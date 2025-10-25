@@ -75,7 +75,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         block: _block, mask: true, use: canBeBlocked, child: child);
   }
 
-  Widget buildLeftPane(BuildContext context) {
+   Widget buildLeftPane(BuildContext context) {
     final leftWidth = 200.0;
     final children = <Widget>[
       if (!isOutgoingOnly) buildPresetPasswordWarning(),
