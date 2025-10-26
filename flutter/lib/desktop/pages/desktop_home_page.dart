@@ -59,12 +59,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   Widget build(BuildContext context) {
   super.build(context);
   return _buildBlock(
-      child: Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      buildLeftPane(context),
-    ],
-  ));
+       child: buildLeftPane(context),
+  );
 }
 
   Widget _buildBlock({required Widget child}) {
@@ -127,6 +123,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     return ChangeNotifierProvider.value(
       value: gFFI.serverModel,
       child: Container(
+        minWidth: 200.0,
+        height: double.infinity,
         color: Theme.of(context).colorScheme.background,
         child: Stack(
           children: [
