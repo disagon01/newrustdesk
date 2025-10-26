@@ -56,10 +56,24 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   final GlobalKey _childKey = GlobalKey();
 
   @override
-  Widget build(BuildContext context) {
+Widget build(BuildContext context) {
   super.build(context);
-  return _buildBlock(
-       child: buildLeftPane(context),
+  return Container(
+    width: 280,
+    height: 220,
+    child: Column(
+      children: [
+        buildIDBoard(context),
+        SizedBox(height: 10),
+        buildPasswordBoard(context),
+        Spacer(),
+        OnlineStatusWidget(
+          onSvcStatusChanged: () {
+            // 保留状态变化回调
+          },
+        ).marginOnly(bottom: 6, right: 6),
+      ],
+    ),
   );
 }
 
@@ -68,110 +82,21 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         block: _block, mask: true, use: canBeBlocked, child: child);
   }
 
-  Widget buildLeftPane(BuildContext context) {
-    final isIncomingOnly = bind.isIncomingOnly();
-    final isOutgoingOnly = bind.isOutgoingOnly();
-    final children = <Widget>[
-      if (!isOutgoingOnly) buildPresetPasswordWarning(),
-      if (bind.isCustomClient())
-        Align(
-          alignment: Alignment.center,
-          child: loadPowered(context),
-        ),
-      Align(
-        alignment: Alignment.center,
-        child: loadLogo(),
-      ),
-      buildTip(context),
-      if (!isOutgoingOnly) buildIDBoard(context),
-      if (!isOutgoingOnly) buildPasswordBoard(context),
-      FutureBuilder<Widget>(
-        future: Future.value(
-            Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
-        builder: (_, data) {
-          if (data.hasData) {
-            if (isIncomingOnly) {
-              if (isInHomePage()) {
-                Future.delayed(Duration(milliseconds: 300), () {
-                  _updateWindowSize();
-                });
-              }
-            }
-            return data.data!;
-          } else {
-            return const Offstage();
-          }
+ Widget buildLeftPane(BuildContext context) {
+  return Column(
+    children: [
+      buildIDBoard(context),
+      SizedBox(height: 10),
+      buildPasswordBoard(context),
+      Spacer(),
+      OnlineStatusWidget(
+        onSvcStatusChanged: () {
+          // 保留状态变化回调
         },
-      ),
-      buildPluginEntry(),
-    ];
-    if (isIncomingOnly) {
-      children.addAll([
-        Divider(),
-        OnlineStatusWidget(
-          onSvcStatusChanged: () {
-            if (isInHomePage()) {
-              Future.delayed(Duration(milliseconds: 300), () {
-                _updateWindowSize();
-              });
-            }
-          },
-        ).marginOnly(bottom: 6, right: 6)
-      ]);
-    }
-    final textColor = Theme.of(context).textTheme.titleLarge?.color;
-    return ChangeNotifierProvider.value(
-      value: gFFI.serverModel,
-      child: Container(
-      width: 200.0,
-      height: double.infinity,
-        color: Theme.of(context).colorScheme.background,
-        child: Stack(
-          children: [
-            Column(
-              children: [
-                SingleChildScrollView(
-                  controller: _leftPaneScrollController,
-                  child: Column(
-                    key: _childKey,
-                    children: children,
-                  ),
-                ),
-                Expanded(child: Container())
-              ],
-            ),
-            if (isOutgoingOnly)
-              Positioned(
-                bottom: 6,
-                left: 12,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: InkWell(
-                    child: Obx(
-                      () => Icon(
-                        Icons.settings,
-                        color: _editHover.value
-                            ? textColor
-                            : Colors.grey.withOpacity(0.5),
-                        size: 22,
-                      ),
-                    ),
-                    onTap: () => {
-                      if (DesktopSettingPage.tabKeys.isNotEmpty)
-                        {
-                          DesktopSettingPage.switch2page(
-                              DesktopSettingPage.tabKeys[0])
-                        }
-                    },
-                    onHover: (value) => _editHover.value = value,
-                  ),
-                ),
-              )
-          ],
-        ),
-      ),
-    );
-  }
+      ).marginOnly(bottom: 6, right: 6),
+    ],
+  );
+}
 
   buildRightPane(BuildContext context) {
     return Container(
@@ -830,6 +755,15 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         _updateWindowSize();
       });
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+  windowManager.setSize(Size(300, 220));
+});
+
+if (bind.isIncomingOnly()) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _updateWindowSize();
+  });
+}
     WidgetsBinding.instance.addObserver(this);
   }
 
