@@ -140,7 +140,7 @@ Widget build(BuildContext context) {
                                   ?.color
                                   ?.withOpacity(0.5)),
                         ).marginOnly(top: 5),
-                        buildPopupMenu(context)
+                        buildPopupMenu(context) // 这里调用的就是三条杠按钮的构建方法
                       ],
                     ),
                   ),
@@ -173,9 +173,14 @@ Widget build(BuildContext context) {
     );
   }
 
- Widget buildPopupMenu(BuildContext context) {
-  return Container(); 
-}
+  /// 隐藏顶部三条杠设置按钮：直接返回空容器，不渲染任何内容
+  Widget buildPopupMenu(BuildContext context) {
+    // 原实现可能是 PopupMenuButton（三条杠），现在返回空容器隐藏
+    return Container(
+      width: 0,
+      height: 0,
+    );
+  }
 
   buildPasswordBoard(BuildContext context) {
     return ChangeNotifierProvider.value(
