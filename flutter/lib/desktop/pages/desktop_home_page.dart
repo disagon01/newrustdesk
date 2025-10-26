@@ -123,7 +123,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     return ChangeNotifierProvider.value(
       value: gFFI.serverModel,
       child: Container(
-       height: double.infinity,
+      width: 200.0,
+      height: double.infinity,
         color: Theme.of(context).colorScheme.background,
         child: Stack(
           children: [
