@@ -105,73 +105,91 @@ Widget build(BuildContext context) {
     );
   }
 
-  buildIDBoard(BuildContext context) {
-    final model = gFFI.serverModel;
-    return Container(
-      margin: const EdgeInsets.only(left: 20, right: 11),
-      height: 57,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Container(
-            width: 2,
-            decoration: const BoxDecoration(color: MyTheme.accent),
-          ).marginOnly(top: 5),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(left: 7),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    height: 25,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          translate("ID"),
-                          style: TextStyle(
-                              fontSize: 14,
-                              color: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
-                                  ?.color
-                                  ?.withOpacity(0.5)),
-                        ).marginOnly(top: 5),
-                        buildPopupMenu(context) // 这里调用的就是三条杠按钮的构建方法
-                      ],
-                    ),
+buildIDBoard(BuildContext context) {
+  final model = gFFI.serverModel;
+  return Container(
+    margin: const EdgeInsets.only(left: 20, right: 11),
+    // 注意：这里把高度从57改成80，避免新增文字被挤压
+    height: 80,
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Container(
+          width: 2,
+          decoration: const BoxDecoration(color: MyTheme.accent),
+        ).marginOnly(top: 5),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(left: 7),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 新增的第一行文字：QucikCtrlr远程（大字体）
+                Text(
+                  "QucikCtrlr远程",
+                  style: TextStyle(
+                    fontSize: 16, // 第一行字体大小，比第二行大
+                    color: Theme.of(context).textTheme.titleLarge?.color,
                   ),
-                  Flexible(
-                    child: GestureDetector(
-                      onDoubleTap: () {
-                        Clipboard.setData(
-                            ClipboardData(text: model.serverId.text));
-                        showToast(translate("Copied"));
-                      },
-                      child: TextFormField(
-                        controller: model.serverId,
-                        readOnly: true,
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.only(top: 10, bottom: 10),
-                        ),
+                ),
+                // 新增的第二行文字：请把下方的ID发给客服即可（小字体）
+                Text(
+                  "请把下方的ID发给客服即可",
+                  style: TextStyle(
+                    fontSize: 12, // 第二行字体大小，比第一行小
+                    color: Theme.of(context).textTheme.titleLarge?.color?.withOpacity(0.7),
+                  ),
+                ).marginOnly(bottom: 4), // 与下方ID标题保持小间距
+                // 以下是原有代码，不用改
+                Container(
+                  height: 25,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        translate("ID"),
                         style: TextStyle(
-                          fontSize: 22,
-                        ),
-                      ).workaroundFreezeLinuxMint(),
-                    ),
-                  )
-                ],
-              ),
+                            fontSize: 14,
+                            color: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.color
+                                ?.withOpacity(0.5)),
+                      ).marginOnly(top: 5),
+                      buildPopupMenu(context)
+                    ],
+                  ),
+                ),
+                Flexible(
+                  child: GestureDetector(
+                    onDoubleTap: () {
+                      Clipboard.setData(
+                          ClipboardData(text: model.serverId.text));
+                      showToast(translate("Copied"));
+                    },
+                    child: TextFormField(
+                      controller: model.serverId,
+                      readOnly: true,
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.only(top: 10, bottom: 10),
+                      ),
+                      style: TextStyle(
+                        fontSize: 22,
+                      ),
+                    ).workaroundFreezeLinuxMint(),
+                  ),
+                )
+              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
 
   /// 隐藏顶部三条杠设置按钮：直接返回空容器，不渲染任何内容
   Widget buildPopupMenu(BuildContext context) {
