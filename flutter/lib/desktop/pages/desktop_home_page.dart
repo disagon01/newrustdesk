@@ -59,8 +59,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
 Widget build(BuildContext context) {
   super.build(context);
   return Container(
-    width: 280,
-    height: 220,
+    width: 218,
+    height: 380,
     child: Column(
       children: [
         buildIDBoard(context),
