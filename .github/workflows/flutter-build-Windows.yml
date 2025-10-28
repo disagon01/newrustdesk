@@ -1,5 +1,6 @@
 name: Build Windows version of RustDesk
 
+# 新增 workflow_dispatch 允许手动触发，保留 workflow_call 供其他工作流调用
 on:
   workflow_call:
     inputs:
@@ -9,19 +10,33 @@ on:
       upload-tag:
         type: string
         default: "nightly"
+  workflow_dispatch:  # 关键：添加手动触发条件，刷新后 Actions 页面会出现“Run workflow”按钮
+    inputs:
+      upload-artifact:  # 手动触发时也支持选择是否上传产物
+        type: boolean
+        description: "Whether to upload build artifacts"
+        required: false
+        default: true
+      upload-tag:       # 手动触发时可指定发布标签
+        type: string
+        description: "Tag name for release (e.g. nightly, v1.4.2)"
+        required: false
+        default: "nightly"
 
 env:
   SCITER_RUST_VERSION: "1.75"
   RUST_VERSION: "1.75"
   LLVM_VERSION: "15.0.6"
   FLUTTER_VERSION: "3.24.5"
-  TAG_NAME: "${{ inputs.upload-tag }}"
+  # 适配手动触发：优先读取 workflow_dispatch 输入，无则用 workflow_call 输入
+  TAG_NAME: "${{ github.event.inputs.upload-tag || inputs.upload-tag }}"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
   VERSION: "1.4.2"
-  UPLOAD_ARTIFACT: "${{ inputs.upload-artifact }}"
+  # 适配手动触发：优先读取 workflow_dispatch 输入，无则用 workflow_call 输入
+  UPLOAD_ARTIFACT: "${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}"
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}"
-  # 添加Repository secrets变量,用户在编译时使用
+  # Repository secrets 变量
   APP_NAME: "${{ secrets.APP_NAME }}"
   RENDEZVOUS_SERVER: "${{ secrets.RENDEZVOUS_SERVER }}"
   RELAY_SERVER: "${{ secrets.RELAY_SERVER }}"
@@ -36,7 +51,7 @@ jobs:
   build-RustDeskTempTopMostWindow:
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     with:
-      upload-artifact: ${{ inputs.upload-artifact }}
+      upload-artifact: ${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}
       target: windows-2022
       configuration: Release
       platform: x64
@@ -88,7 +103,7 @@ jobs:
           channel: "stable"
           flutter-version: ${{ env.FLUTTER_VERSION }}
 
-      # https://github.com/flutter/flutter/issues/155685
+      # 替换 RustDesk 自定义 Flutter 引擎
       - name: Replace engine with rustdesk custom flutter engine
         run: |
           flutter doctor -v
@@ -144,24 +159,24 @@ jobs:
 
       - name: Build rustdesk
         run: |
-          # Windows: build RustDesk
+          # 编译 RustDesk
           python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
 
-          # Download usbmmidd_v2.zip and extract it to ./rustdesk
+          # 下载 USB 虚拟显示器驱动
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
           Expand-Archive usbmmidd_v2.zip -DestinationPath .
           Remove-Item -Path usbmmidd_v2\Win32 -Recurse
           Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
           mv -Force .\usbmmidd_v2 ./rustdesk
 
-          # Download printer driver files and extract them to ./rustdesk
+          # 下载打印机驱动（失败时忽略）
           try {
             Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip -OutFile rustdesk_printer_driver_v4-1.4.zip
             Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip -OutFile printer_driver_adapter.zip
             Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/sha256sums -OutFile sha256sums
 
-            # Check and move the files
+            # 校验哈希并移动文件
             $checksum_driver = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*rustdesk_printer_driver_v4-1.4\.zip$').Matches.Groups[1].Value
             $downloadsum_driver = Get-FileHash -Path rustdesk_printer_driver_v4-1.4.zip -Algorithm SHA256
             $checksum_adapter = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*printer_driver_adapter\.zip$').Matches.Groups[1].Value
@@ -183,8 +198,6 @@ jobs:
           }
 
       - name: find Runner.res
-        # Windows: find Runner.res (compiled from ./flutter/windows/runner/Runner.rc), copy to ./Runner.res
-        # Runner.rc does not contain actual version, but Runner.res does
         continue-on-error: true
         shell: bash
         run: |
@@ -200,7 +213,7 @@ jobs:
 
       - name: Download RustDeskTempTopMostWindow artifacts
         uses: actions/download-artifact@master
-        if: ${{ inputs.upload-artifact }}
+        if: ${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}
         with:
           name: topmostwindow-artifacts
           path: "./rustdesk"
