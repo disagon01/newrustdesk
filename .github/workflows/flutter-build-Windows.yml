@@ -56,9 +56,6 @@ jobs:
       configuration: Release
       platform: x64
       target_version: Windows10
-    strategy:
-      fail-fast: false
-
   # 核心任务：仅保留 Windows Flutter 版本编译（x64 主流架构）
   build-for-windows-flutter:
     name: x86_64-pc-windows-msvc (Flutter)
@@ -270,3 +267,4 @@ jobs:
           files: |
             ./SignOutput/rustdesk-*.msi
             ./SignOutput/rustdesk-*.exe
+
