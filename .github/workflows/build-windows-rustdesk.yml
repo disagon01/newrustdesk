@@ -1,6 +1,7 @@
-name: Build Windows Version of RustDesk (GitHub Compile)
+name: Build Windows version of RustDesk
 
-# 支持手动触发和工作流调用（修复参数类型问题）
+# 关键新增：添加 workflow_dispatch 支持手动触发（显示 Run workflow 按钮）
+# 保留 workflow_call 支持被其他工作流调用
 on:
   workflow_dispatch:
     inputs:
@@ -11,7 +12,7 @@ on:
         default: true
       upload-tag:
         type: string
-        description: "Tag for GitHub Release (e.g. nightly, v1.4.2, default: nightly)"
+        description: "Tag name for release (e.g. nightly, v1.4.2, default: nightly)"
         required: false
         default: "nightly"
   workflow_call:
@@ -23,18 +24,19 @@ on:
         type: string
         default: "nightly"
 
-# GitHub 编译专用环境变量
 env:
-  SCITER_RUST_VERSION: "1.75.0"
+  SCITER_RUST_VERSION: "1.75"
+  RUST_VERSION: "1.75"
   LLVM_VERSION: "15.0.6"
   FLUTTER_VERSION: "3.24.5"
+  # 适配手动/调用两种触发：优先读取手动输入参数
+  TAG_NAME: "${{ github.event.inputs.upload-tag || inputs.upload-tag }}"
+  UPLOAD_ARTIFACT: "${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
   VERSION: "1.4.2"
-  # 修复布尔值解析问题：通过表达式明确转换为布尔类型
-  TAG_NAME: "${{ github.event.inputs.upload-tag || inputs.upload-tag }}"
-  UPLOAD_ARTIFACT: "${{ (github.event.inputs.upload-artifact == true) || (inputs.upload-artifact == true) }}"
-  # 仓库密钥（需在 GitHub Secrets 配置）
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}"
+  # 仓库自定义变量（需在 GitHub Secrets 配置）
   APP_NAME: "${{ secrets.APP_NAME }}"
   RENDEZVOUS_SERVER: "${{ secrets.RENDEZVOUS_SERVER }}"
   RELAY_SERVER: "${{ secrets.RELAY_SERVER }}"
@@ -43,304 +45,252 @@ env:
   DEFAULT_PASSWORD: "${{ secrets.DEFAULT_PASSWORD }}"
 
 jobs:
-  # 前置任务1：生成 Rust-Flutter 桥接代码
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
 
-  # 前置任务2：编译顶层窗口组件（修复参数传递类型）
-  build-topmost-window:
+  build-RustDeskTempTopMostWindow:
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     with:
-      # 明确传递布尔值，避免 YAML 解析错误
-      upload-artifact: ${{ (github.event.inputs.upload-artifact == true) || (inputs.upload-artifact == true) }}
+      # 适配手动/调用触发：传递正确的 upload-artifact 参数
+      upload-artifact: ${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}
       target: windows-2022
       configuration: Release
       platform: x64
       target_version: Windows10
+    # 移除多余的 strategy 配置（引用外部工作流时不支持该字段，避免语法错误）
 
-  # 核心编译任务（Windows x64 Flutter 版本）
-  build-windows-flutter:
-    name: Windows x64 (Flutter)
-    needs: [generate-bridge, build-topmost-window]
-    runs-on: windows-2022
+  build-for-windows-flutter:
+    name: ${{ matrix.job.target }}
+    needs: [build-RustDeskTempTopMostWindow, generate-bridge]
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - {
+              target: x86_64-pc-windows-msvc,
+              os: windows-2022,
+              arch: x86_64,
+              vcpkg-triplet: x64-windows-static,
+            }
     steps:
-      # 清理磁盘空间（GitHub Runner 空间有限）
-      - name: Free Disk Space
-        run: |
-          Remove-Item -Path "C:\Program Files\Docker" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "C:\ProgramData\Package Cache" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
-        shell: powershell
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      # 拉取代码（含子模块）
-      - name: Checkout Source Code
+      - name: Checkout source code
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          fetch-depth: 0
+          submodules: recursive  # 拉取所有子模块（关键依赖）
 
-      # 恢复桥接文件
-      - name: Restore Bridge Files
-        uses: actions/download-artifact@v4
+      - name: Restore bridge files
+        uses: actions/download-artifact@v4  # 升级到最新版，修复下载兼容性问题
         with:
           name: bridge-artifact
           path: ./
-          overwrite: true
+          overwrite: true  # 强制覆盖旧文件，避免缓存冲突
 
-      # 安装 LLVM
-      - name: Install LLVM & Clang
+      - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1
         with:
           version: ${{ env.LLVM_VERSION }}
-          cache: true
 
-      # 安装 Flutter（指定兼容版本）
-      - name: Install Flutter
+      - name: Install flutter
         uses: subosito/flutter-action@v2.12.0
         with:
           channel: "stable"
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
 
-      # 【关键修复】替换 Flutter Engine（兼容低版本 PowerShell，解决 RetryCount 错误）
-      - name: Replace Flutter Engine (PowerShell 兼容版)
+      # 修复 Flutter 引擎下载：兼容低版本 PowerShell（避免 RetryCount 错误）
+      - name: Replace engine with rustdesk custom flutter engine
         run: |
           flutter doctor -v
           flutter precache --windows
-
-          # 1. 定义引擎下载链接（GitHub 直链，避免代理拦截）
+          # 用 WebClient 实现下载（兼容所有 PowerShell 版本）
           $engineUrl = "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
           $outputFile = "windows-x64-release.zip"
-          $retryCount = 5  # 重试5次，应对 GitHub 网络波动
-          $retryIntervalSec = 10  # 每次重试间隔10秒
-          $success = $false
-
-          # 2. 用 WebClient 实现下载（兼容所有 PowerShell 版本）
           $webClient = New-Object System.Net.WebClient
-          for ($i = 1; $i -le $retryCount; $i++) {
-            try {
-              Write-Host "第 $i 次尝试下载引擎（共 $retryCount 次）"
-              $webClient.DownloadFile($engineUrl, $outputFile)
-              $success = $true
-              Write-Host "✅ 引擎压缩包下载成功"
-              break
-            }
-            catch {
-              Write-Warning "❌ 第 $i 次下载失败：$($_.Exception.Message)"
-              if ($i -lt $retryCount) {
-                Write-Host "等待 $retryIntervalSec 秒后重试..."
-                Start-Sleep -Seconds $retryIntervalSec
-              }
-            }
-          }
+          $webClient.DownloadFile($engineUrl, $outputFile)
           $webClient.Dispose()
-
-          # 3. 检查下载结果（避免空文件/损坏文件）
-          if (-not $success) {
-            Write-Error "❌ 引擎下载失败（已重试 $retryCount 次）"
-            exit 1
+          # 解压并替换引擎
+          Expand-Archive -Path $outputFile -DestinationPath windows-x64-release -Force
+          $flutterEngineDir = "C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/"
+          if (-not (Test-Path $flutterEngineDir)) {
+            New-Item -ItemType Directory -Path $flutterEngineDir | Out-Null
           }
-          if (-not (Test-Path $outputFile) -or (Get-Item $outputFile).Length -eq 0) {
-            Write-Error "❌ 引擎压缩包为空或不存在"
-            exit 1
-          }
-
-          # 4. 解压引擎压缩包（先清理旧目录）
-          if (Test-Path "windows-x64-release") {
-            Write-Host "清理旧引擎解压目录..."
-            Remove-Item -Path "windows-x64-release" -Recurse -Force -ErrorAction Stop
-          }
-          Write-Host "正在解压引擎压缩包..."
-          Expand-Archive -Path $outputFile -DestinationPath "windows-x64-release" -Force
-
-          # 5. 动态获取 Flutter 引擎目录（避免硬编码路径错误）
-          $flutterBinPath = (Get-Command flutter).Source
-          $flutterRoot = Split-Path (Split-Path $flutterBinPath -Parent) -Parent
-          $engineDir = Join-Path $flutterRoot "cache\artifacts\engine\windows-x64-release\"
-
-          # 6. 替换自定义引擎
-          if (-not (Test-Path $engineDir)) {
-            Write-Host "创建 Flutter 引擎目录：$engineDir"
-            New-Item -ItemType Directory -Path $engineDir -Force | Out-Null
-          }
-          Write-Host "正在替换 Flutter 引擎..."
-          Move-Item -Path "windows-x64-release\*" -Destination $engineDir -Force
-          Write-Host "✅ Flutter 引擎替换完成"
+          mv -Force windows-x64-release/* $flutterEngineDir
         shell: powershell  # 明确指定 powershell，避免版本兼容问题
 
-      # 应用 Flutter 补丁（版本匹配时执行）
-      - name: Patch Flutter (DropdownMenu Fix)
-        run: |
-          if [[ "${{ env.FLUTTER_VERSION }}" == "3.24.5" ]]; then
-            patchFile=".github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
-            if [ -f "$patchFile" ]; then
-              flutterRoot=$(dirname $(dirname $(which flutter)))
-              cp "$patchFile" "$flutterRoot/"
-              cd "$flutterRoot" && git apply "$patchFile" || echo "Patch applied with warnings"
-              echo "✅ Flutter 补丁应用完成"
-            else
-              echo "⚠️ Flutter 补丁文件未找到，跳过"
-            fi
-          else
-            echo "⚠️ Flutter 版本不匹配（当前: ${{ env.FLUTTER_VERSION }}），跳过补丁"
-          fi
+      - name: Patch flutter
         shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
 
-      # 安装 Rust 工具链
-      - name: Install Rust Toolchain
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ env.SCITER_RUST_VERSION }}
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.job.target }}
           components: "rustfmt"
-          cache: true
 
-      # 缓存 Rust 依赖
-      - name: Cache Rust Dependencies
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: windows-2022
-          cache-on-failure: true
+          prefix-key: ${{ matrix.job.os }}
 
-      # 配置 vcpkg
-      - name: Setup vcpkg
+      - name: Setup vcpkg with Github Actions binary cache
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: C:\vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
-      # 安装 vcpkg 依赖
-      - name: Install vcpkg Dependencies
+      - name: Install vcpkg dependencies
         env:
-          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.job.vcpkg-triplet }}
         run: |
-          echo "正在安装 vcpkg 依赖（FFmpeg 等）..."
-          if ! $VCPKG_ROOT/vcpkg install --triplet x64-windows-static; then
-            echo "❌ vcpkg 依赖安装失败，打印日志排查..."
-            find "${VCPKG_ROOT}/" -name "*.log" | head -3 | while read log; do
-              echo "=== 日志: $log ===" && cat "$log" | head -50 && echo "=== 日志结束 ==="
+          if ! $VCPKG_ROOT/vcpkg \
+            install \
+            --triplet ${{ matrix.job.vcpkg-triplet }} \
+            --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"
+              echo "======"
+              cat "$_1"
+              echo "======"
+              echo ""
             done
             exit 1
           fi
-          echo "✅ vcpkg 依赖安装完成"
+          head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
 
-      # 编译 RustDesk 主程序
-      - name: Build RustDesk
+      - name: Build rustdesk
         run: |
-          echo "正在编译 RustDesk 主程序..."
+          # 编译主程序
           python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
-          echo "✅ RustDesk 主程序编译完成"
 
-          # 下载 USB 虚拟显示器驱动
-          echo "正在下载 USB 虚拟显示器驱动..."
+          # 下载 USB 驱动（兼容低版本 PowerShell）
           $usbUrl = "https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip"
-          $usbOutput = "usbmmidd_v2.zip"
           $usbClient = New-Object System.Net.WebClient
-          $usbClient.DownloadFile($usbUrl, $usbOutput)
+          $usbClient.DownloadFile($usbUrl, "usbmmidd_v2.zip")
           $usbClient.Dispose()
-          Expand-Archive -Path $usbOutput -DestinationPath . -Force
+          Expand-Archive -Path "usbmmidd_v2.zip" -DestinationPath . -Force
           Remove-Item -Path usbmmidd_v2\Win32 -Recurse -ErrorAction SilentlyContinue
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat" -ErrorAction SilentlyContinue
           mv -Force .\usbmmidd_v2 ./rustdesk
-          echo "✅ USB 驱动下载并复制完成"
 
-          # 下载打印机驱动（失败忽略）
+          # 下载打印机驱动（带错误处理）
           try {
-            echo "正在下载打印机驱动..."
             $driverUrl = "https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip"
             $adapterUrl = "https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip"
+            $sumUrl = "https://github.com/rustdesk/hbb_common/releases/download/driver/sha256sums"
+            
             $driverClient = New-Object System.Net.WebClient
             $driverClient.DownloadFile($driverUrl, "rustdesk_printer_driver_v4-1.4.zip")
             $driverClient.DownloadFile($adapterUrl, "printer_driver_adapter.zip")
+            $driverClient.DownloadFile($sumUrl, "sha256sums")
             $driverClient.Dispose()
-            Expand-Archive -Path "rustdesk_printer_driver_v4-1.4.zip" -DestinationPath . -Force
-            mkdir ./rustdesk/drivers -Force
-            mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
-            Expand-Archive -Path "printer_driver_adapter.zip" -DestinationPath . -Force
-            mv -Force .\printer_driver_adapter.dll ./rustdesk
-            echo "✅ 打印机驱动下载并复制完成"
+
+            # 校验哈希并移动文件
+            $checksum_driver = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*rustdesk_printer_driver_v4-1.4\.zip$').Matches.Groups[1].Value
+            $downloadsum_driver = (Get-FileHash -Path "rustdesk_printer_driver_v4-1.4.zip" -Algorithm SHA256).Hash
+            $checksum_adapter = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*printer_driver_adapter\.zip$').Matches.Groups[1].Value
+            $downloadsum_adapter = (Get-FileHash -Path "printer_driver_adapter.zip" -Algorithm SHA256).Hash
+
+            if ($checksum_driver -eq $downloadsum_driver -and $checksum_adapter -eq $downloadsum_adapter) {
+                Expand-Archive -Path "rustdesk_printer_driver_v4-1.4.zip" -DestinationPath . -Force
+                mkdir ./rustdesk/drivers -Force
+                mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
+                Expand-Archive -Path "printer_driver_adapter.zip" -DestinationPath . -Force
+                mv -Force .\printer_driver_adapter.dll ./rustdesk
+            } else {
+                Write-Output "rustdesk_printer_driver_v4-1.4 or adapter checksums do not match, ignore."
+            }
           } catch {
-            Write-Warning "⚠️ 打印机驱动下载失败：$($_.Exception.Message)，跳过该步骤"
+              Write-Host "Ignore the printer driver error: $_"
           }
         shell: powershell
 
-      # 下载顶层窗口组件产物
-      - name: Download TopMostWindow Artifacts
+      - name: find Runner.res
+        continue-on-error: true
+        shell: bash
+        run: |
+          runner_res=$(find . -name "Runner.res");
+          if [ "$runner_res" == "" ]; then
+            echo "Runner.res: not found";
+          else
+            echo "Runner.res: $runner_res";
+            cp $runner_res ./libs/portable/Runner.res;
+            echo "list ./libs/portable/Runner.res";
+            ls -l ./libs/portable/Runner.res;
+          fi
+
+      - name: Download RustDeskTempTopMostWindow artifacts
         uses: actions/download-artifact@v4
         if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
         with:
           name: topmostwindow-artifacts
-          path: ./rustdesk
-          overwrite: true
+          path: "./rustdesk"
 
-      # 上传未签名产物
-      - name: Upload Unsigned Artifacts
-        if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
+      - name: Upload unsigned
+        if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: rustdesk-unsigned-windows-x64
+          name: rustdesk-unsigned-windows-${{ matrix.job.arch }}
           path: rustdesk
-          retention-days: 3
 
-      # 签名文件（可选）
-      - name: Sign Executables
-        if: ${{ env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '' }}
+      - name: Sign rustdesk files
+        if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != ''
+        shell: bash
         run: |
-          echo "正在安装签名依赖..."
-          pip3 install requests argparse --upgrade
-          echo "正在签名可执行文件..."
+          pip3 install requests argparse
           BASE_URL=${{ secrets.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./rustdesk/
-          echo "✅ 可执行文件签名完成"
-        shell: bash
 
-      # 构建自解压绿色包
-      - name: Build Portable Executable
-        if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
+      - name: Build self-extracted executable
+        shell: bash
+        if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          echo "正在构建自解压绿色包..."
           sed -i '/dpiAware/d' res/manifest.xml
-          cd ./libs/portable && pip3 install -r requirements.txt --upgrade
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
-          cd ../../ && mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-x64.exe
-          echo "✅ 自解压绿色包构建完成"
-        shell: bash
+          popd
+          mkdir -p ./SignOutput
+          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
 
-      # 构建 MSI 安装包
-      - name: Build MSI Installer
-        if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build msi
+        if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          echo "正在构建 MSI 安装包..."
-          cd ./res/msi && python preprocess.py --arp -d ../../rustdesk
+          pushd ./res/msi
+          python preprocess.py --arp -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
-          mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-${{ env.VERSION }}-x64.msi
-          echo "✅ MSI 安装包构建完成"
-          echo "MSI 文件哈希：$(sha256sum ../../SignOutput/rustdesk-${{ env.VERSION }}-x64.msi)"
+          mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.msi
+          sha256sum ../../SignOutput/rustdesk-*.msi
         shell: bash
 
-      # 签名最终产物（可选）
-      - name: Sign Final Files
-        if: ${{ env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '' }}
+      - name: Sign rustdesk self-extracted file
+        if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != ''
+        shell: bash
         run: |
-          echo "正在签名最终产物（MSI/EXE）..."
           BASE_URL=${{ secrets.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./SignOutput
-          echo "✅ 最终产物签名完成"
-        shell: bash
 
-      # 发布到 GitHub Release
-      - name: Publish to GitHub Release
-        if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
-        uses: softprops/action-gh-release@v2
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2  # 升级到最新版，修复发布兼容性问题
+        if: env.UPLOAD_ARTIFACT == 'true'
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
-          files: ./SignOutput/rustdesk-*.exe ./SignOutput/rustdesk-*.msi
-          fail_on_unmatched_files: false
-          body: |
-            ## RustDesk Windows 编译产物
-            - 架构：x64
-            - 版本：${{ env.VERSION }}
-            - 类型：自解压绿色包（.exe） + MSI 安装包（.msi）
+          files: |
+            ./SignOutput/rustdesk-*.msi
+            ./SignOutput/rustdesk-*.exe
+          fail_on_unmatched_files: false  # 避免文件缺失导致发布失败
