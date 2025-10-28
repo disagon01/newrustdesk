@@ -1,7 +1,19 @@
-name: Build Windows version of RustDesk
+name: Build Windows Version of RustDesk (GitHub Compile)
 
-# 关键修改：添加 workflow_dispatch 支持手动触发，保留 workflow_call 支持被其他工作流调用
+# 支持两种触发方式：1.手动触发 2.被其他工作流调用
 on:
+  workflow_dispatch:
+    inputs:
+      upload-artifact:
+        type: boolean
+        description: "Whether to upload build artifacts (default: true)"
+        required: false
+        default: true
+      upload-tag:
+        type: string
+        description: "Tag for GitHub Release (e.g. nightly, v1.4.2, default: nightly)"
+        required: false
+        default: "nightly"
   workflow_call:
     inputs:
       upload-artifact:
@@ -10,33 +22,19 @@ on:
       upload-tag:
         type: string
         default: "nightly"
-  workflow_dispatch:  # 新增手动触发配置
-    inputs:
-      upload-artifact:  # 手动触发时可选择是否上传产物
-        type: boolean
-        description: "Whether to upload build artifacts (default: true)"
-        required: false
-        default: true
-      upload-tag:       # 手动触发时可指定发布标签
-        type: string
-        description: "Tag name for release (e.g. nightly, v1.4.2, default: nightly)"
-        required: false
-        default: "nightly"
 
+# GitHub 编译所需环境变量（仅保留 Windows 必需项）
 env:
-  SCITER_RUST_VERSION: "1.75.0"
-  RUST_VERSION: "1.75.0"
-  LLVM_VERSION: "15.0.6"
-  FLUTTER_VERSION: "3.24.5"
-  # 适配手动/调用两种触发：优先读取手动输入，无则用调用输入
+  SCITER_RUST_VERSION: "1.75.0"    # RustDesk 兼容的 Rust 版本
+  LLVM_VERSION: "15.0.6"           # 编译依赖的 LLVM 版本
+  FLUTTER_VERSION: "3.24.5"        # 固定 Flutter 版本，避免兼容性问题
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"  # 依赖管理版本
+  VERSION: "1.4.2"                 # 软件版本号
+  # 适配手动/调用触发：优先读取手动输入参数
   TAG_NAME: "${{ github.event.inputs.upload-tag || inputs.upload-tag }}"
-  # 适配手动/调用两种触发：优先读取手动输入，无则用调用输入
   UPLOAD_ARTIFACT: "${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}"
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
-  VERSION: "1.4.2"
+  # 仓库密钥（需在 GitHub 仓库 -> Settings -> Secrets 中配置）
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}"
-  # 自定义配置变量
   APP_NAME: "${{ secrets.APP_NAME }}"
   RENDEZVOUS_SERVER: "${{ secrets.RENDEZVOUS_SERVER }}"
   RELAY_SERVER: "${{ secrets.RELAY_SERVER }}"
@@ -45,209 +43,160 @@ env:
   DEFAULT_PASSWORD: "${{ secrets.DEFAULT_PASSWORD }}"
 
 jobs:
+  # 前置任务1：生成 Rust-Flutter 桥接代码（依赖 bridge.yml）
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
 
-  build-RustDeskTempTopMostWindow:
+  # 前置任务2：编译顶层窗口组件（依赖 third-party-RustDeskTempTopMostWindow.yml）
+  build-topmost-window:
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     with:
-      # 适配手动/调用两种触发：传递正确的 upload-artifact 参数
       upload-artifact: ${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}
       target: windows-2022
       configuration: Release
       platform: x64
       target_version: Windows10
 
-  build-for-windows-flutter:
-    name: ${{ matrix.job.target }}
-    needs: [build-RustDeskTempTopMostWindow, generate-bridge]
-    runs-on: ${{ matrix.job.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        job:
-          - {
-              target: x86_64-pc-windows-msvc,
-              os: windows-2022,
-              arch: x86_64,
-              vcpkg-triplet: x64-windows-static,
-            }
+  # 核心任务：Windows Flutter 版本编译（x64 架构）
+  build-windows-flutter:
+    name: Windows x64 (Flutter)
+    needs: [generate-bridge, build-topmost-window]  # 依赖前置任务完成
+    runs-on: windows-2022  # GitHub 托管的 Windows  runner
     steps:
-      - name: Free disk space (Windows)
+      # 步骤1：清理磁盘空间（GitHub runner 默认空间有限，避免编译中途不足）
+      - name: Free Disk Space
         run: |
-          # 清理冗余文件，释放编译空间
           Remove-Item -Path "C:\Program Files\Docker" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path "C:\ProgramData\Package Cache" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
 
-      - name: Export GitHub Actions cache variables
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Checkout source code
+      # 步骤2：拉取代码（含子模块）
+      - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive  # 拉取所有子模块（关键依赖）
+          submodules: recursive  # 必须拉取子模块（如 hbb_common、flutter_rust_bridge）
           fetch-depth: 0         # 拉取完整历史，避免子模块引用失败
 
-      - name: Restore bridge files
+      # 步骤3：恢复桥接文件（从 generate-bridge 任务的 artifacts 下载）
+      - name: Restore Bridge Files
         uses: actions/download-artifact@v4
         with:
           name: bridge-artifact
           path: ./
-          overwrite: true  # 强制覆盖旧文件，避免缓存冲突
+          overwrite: true  # 覆盖旧文件，避免缓存冲突
 
-      - name: Install LLVM and Clang
+      # 步骤4：安装 LLVM（编译 Rust 依赖必需）
+      - name: Install LLVM & Clang
         uses: KyleMayes/install-llvm-action@v1
         with:
           version: ${{ env.LLVM_VERSION }}
-          cache: true  # 启用缓存，加速后续编译
+          cache: true  # 启用 GitHub 缓存，加速后续编译
 
+      # 步骤5：安装 Flutter（含缓存）
       - name: Install Flutter
         uses: subosito/flutter-action@v2.14.0
         with:
           channel: "stable"
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true  # 缓存Flutter依赖，减少下载时间
+          cache: true  # 缓存 Flutter 依赖，减少重复下载
 
-      - name: Replace with RustDesk custom Flutter engine
+      # 步骤6：替换为 RustDesk 自定义 Flutter 引擎（解决渲染问题）
+      - name: Replace Flutter Engine with RustDesk Custom Version
         run: |
-          flutter doctor -v  # 验证Flutter环境
-          flutter precache --windows  # 预下载Windows依赖
-          # 使用镜像加速引擎下载（解决GitHub访问超时）
+          flutter doctor -v  # 验证 Flutter 环境
+          flutter precache --windows  # 预下载 Windows 平台依赖
+          # 使用 GitHub 镜像加速下载（避免访问超时）
           $engineUrl = "https://ghproxy.com/https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
-          # 3次重试+5秒间隔，避免网络波动
           Invoke-WebRequest -Uri $engineUrl -OutFile windows-x64-release.zip -RetryCount 3 -RetryIntervalSec 5
           Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release -Force
-          # 确保Flutter引擎路径存在
-          $flutterEngineDir = "C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/"
-          if (-not (Test-Path $flutterEngineDir)) {
-              New-Item -ItemType Directory -Path $flutterEngineDir | Out-Null
-          }
-          # 替换自定义引擎
-          mv -Force windows-x64-release/* $flutterEngineDir
-        shell: pwsh  # 使用PowerShell处理Windows路径，避免符号链接问题
+          # 确保 Flutter 引擎目录存在
+          $engineDir = "C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/"
+          if (-not (Test-Path $engineDir)) { New-Item -ItemType Directory -Path $engineDir | Out-Null }
+          # 替换引擎文件
+          mv -Force windows-x64-release/* $engineDir
+        shell: pwsh  # GitHub Windows runner 推荐用 PowerShell 处理路径
 
-      - name: Patch Flutter (DropdownMenu fix)
+      # 步骤7：应用 Flutter 补丁（修复 DropdownMenu 过滤功能）
+      - name: Patch Flutter (DropdownMenu Fix)
         shell: bash
         run: |
-          # 仅当Flutter版本匹配时应用补丁（避免版本不兼容）
           if [[ "${{ env.FLUTTER_VERSION }}" == "3.24.5" ]]; then
-            patchPath=".github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
-            if [ -f "$patchPath" ]; then
-              flutterDir=$(dirname $(dirname $(which flutter)))
-              cp "$patchPath" "$flutterDir/"
-              cd "$flutterDir"
-              git apply flutter_3.24.4_dropdown_menu_enableFilter.diff || echo "Patch applied with minor warnings"
-            else
-              echo "Patch file not found, skipping"
+            patchFile=".github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+            if [ -f "$patchFile" ]; then
+              flutterRoot=$(dirname $(dirname $(which flutter)))
+              cp "$patchFile" "$flutterRoot/"
+              cd "$flutterRoot" && git apply "$patchFile" || echo "Patch applied with warnings"
             fi
-          else
-            echo "Flutter version mismatch, skipping patch"
           fi
 
-      - name: Install Rust toolchain
+      # 步骤8：安装 Rust 工具链
+      - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ env.SCITER_RUST_VERSION }}
-          targets: ${{ matrix.job.target }}  # 仅安装Windows x64目标
-          components: "rustfmt"  # 安装代码格式化工具（部分编译依赖）
-          cache: true  # 缓存Rust依赖
+          targets: x86_64-pc-windows-msvc  # 仅安装 Windows x64 目标
+          components: "rustfmt"
+          cache: true  # 缓存 Rust 依赖
 
-      - name: Cache Rust dependencies
+      # 步骤9：缓存 Rust 依赖（加速后续编译）
+      - name: Cache Rust Dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: ${{ matrix.job.os }}  # 按操作系统区分缓存
-          cache-on-failure: true  # 即使失败也保留缓存，减少下次重试时间
+          prefix-key: windows-2022
+          cache-on-failure: true  # 失败也保留缓存，减少重试时间
 
-      - name: Setup vcpkg (dependency manager)
+      # 步骤10：配置 vcpkg（管理 C++ 依赖，如 FFmpeg）
+      - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: C:\vcpkg
-          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}  # 固定vcpkg版本，避免依赖冲突
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
-      - name: Install vcpkg dependencies (FFmpeg etc.)
+      # 步骤11：安装 vcpkg 依赖（FFmpeg、Opus 等）
+      - name: Install vcpkg Dependencies
         env:
-          VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.job.vcpkg-triplet }}
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
         run: |
-          # 安装编译必需的依赖（FFmpeg、Opus等）
-          if ! $VCPKG_ROOT/vcpkg install --triplet ${{ matrix.job.vcpkg-triplet }} --x-install-root="$VCPKG_ROOT/installed"; then
-            # 若失败，打印vcpkg日志帮助排查
-            find "${VCPKG_ROOT}/" -name "*.log" | while read -r logFile; do
-              echo "=== Log: $logFile ==="
-              cat "$logFile" | head -n 50  # 打印前50行，避免日志过长
-              echo "===================="
+          if ! $VCPKG_ROOT/vcpkg install --triplet x64-windows-static; then
+            # 打印日志帮助排查依赖安装失败
+            find "${VCPKG_ROOT}/" -name "*.log" | head -3 | while read log; do
+              echo "=== $log ===" && cat "$log" | head -50 && echo "=== End ==="
             done
             exit 1
           fi
         shell: bash
 
-      - name: Build RustDesk (Flutter version)
+      # 步骤12：编译 RustDesk 主程序
+      - name: Build RustDesk (Flutter Version)
         run: |
-          # 编译主程序（--flutter启用Flutter界面，--hwcodec启用硬件解码）
+          # 编译主程序（--flutter 启用 Flutter 界面，--hwcodec 启用硬件解码）
           python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
-          # 移动编译产物到统一目录
-          mv ./flutter/build/windows/x64/runner/Release ./rustdesk
+          mv ./flutter/build/windows/x64/runner/Release ./rustdesk  # 整理编译产物
 
-          # 下载USB虚拟显示器驱动（远程控制必备）
-          $usbDriverUrl = "https://ghproxy.com/https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip"
-          Invoke-WebRequest -Uri $usbDriverUrl -OutFile usbmmidd_v2.zip -RetryCount 3
+          # 下载 USB 虚拟显示器驱动（远程控制必备）
+          $usbUrl = "https://ghproxy.com/https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip"
+          Invoke-WebRequest -Uri $usbUrl -OutFile usbmmidd_v2.zip -RetryCount 3
           Expand-Archive usbmmidd_v2.zip -DestinationPath . -Force
-          # 清理无用文件，仅保留x64驱动
           Remove-Item -Path usbmmidd_v2\Win32 -Recurse -ErrorAction SilentlyContinue
-          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat" -ErrorAction SilentlyContinue
           mv -Force .\usbmmidd_v2 ./rustdesk
 
-          # 下载打印机驱动（非必需，失败不影响主功能）
+          # 下载打印机驱动（非必需，失败不中断）
           try {
-            $printerDriverUrl = "https://ghproxy.com/https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip"
+            $driverUrl = "https://ghproxy.com/https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip"
             $adapterUrl = "https://ghproxy.com/https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip"
-            $sumUrl = "https://ghproxy.com/https://github.com/rustdesk/hbb_common/releases/download/driver/sha256sums"
-            
-            Invoke-WebRequest -Uri $printerDriverUrl -OutFile rustdesk_printer_driver_v4-1.4.zip -RetryCount 2
+            Invoke-WebRequest -Uri $driverUrl -OutFile rustdesk_printer_driver_v4-1.4.zip -RetryCount 2
             Invoke-WebRequest -Uri $adapterUrl -OutFile printer_driver_adapter.zip -RetryCount 2
-            Invoke-WebRequest -Uri $sumUrl -OutFile sha256sums -RetryCount 2
-
-            # 校验哈希，确保文件完整性
-            $checksumDriver = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*rustdesk_printer_driver_v4-1.4\.zip$').Matches.Groups[1].Value
-            $downloadSumDriver = (Get-FileHash -Path rustdesk_printer_driver_v4-1.4.zip -Algorithm SHA256).Hash
-            $checksumAdapter = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*printer_driver_adapter\.zip$').Matches.Groups[1].Value
-            $downloadSumAdapter = (Get-FileHash -Path printer_driver_adapter.zip -Algorithm SHA256).Hash
-
-            if ($checksumDriver -eq $downloadSumDriver -and $checksumAdapter -eq $downloadSumAdapter) {
-                Expand-Archive rustdesk_printer_driver_v4-1.4.zip -DestinationPath . -Force
-                mkdir ./rustdesk/drivers -Force
-                mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
-                Expand-Archive printer_driver_adapter.zip -DestinationPath . -Force
-                mv -Force .\printer_driver_adapter.dll ./rustdesk
-            } else {
-                Write-Warning "Printer driver checksum mismatch, skipping"
-            }
-          } catch {
-              Write-Warning "Failed to download printer drivers: $_"
-          }
+            Expand-Archive rustdesk_printer_driver_v4-1.4.zip -DestinationPath . -Force
+            mkdir ./rustdesk/drivers -Force
+            mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
+            Expand-Archive printer_driver_adapter.zip -DestinationPath . -Force
+            mv -Force .\printer_driver_adapter.dll ./rustdesk
+          } catch { Write-Warning "Printer driver download failed: $_" }
         shell: pwsh
 
-      - name: Copy Runner.res (version info)
-        continue-on-error: true  # 非必需步骤，失败不中断
-        shell: bash
-        run: |
-          # 查找编译生成的版本信息文件
-          runnerRes=$(find . -name "Runner.res")
-          if [ -n "$runnerRes" ]; then
-            echo "Found Runner.res at: $runnerRes"
-            mkdir -p ./libs/portable
-            cp "$runnerRes" ./libs/portable/Runner.res
-            ls -l ./libs/portable/Runner.res
-          else
-            echo "Runner.res not found (does not affect core functionality)"
-          fi
-
-      - name: Download TopMostWindow component
+      # 步骤13：下载顶层窗口组件产物
+      - name: Download TopMostWindow Artifacts
         uses: actions/download-artifact@v4
         if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
         with:
@@ -255,69 +204,57 @@ jobs:
           path: ./rustdesk
           overwrite: true
 
-      - name: Upload unsigned artifacts (temp)
+      # 步骤14：上传未签名产物（临时存储，用于调试）
+      - name: Upload Unsigned Artifacts
         if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: rustdesk-unsigned-windows-${{ matrix.job.arch }}
+          name: rustdesk-unsigned-windows-x64
           path: rustdesk
-          retention-days: 3  # 临时存储3天，用于调试
+          retention-days: 3  # 保留3天
 
-      - name: Sign executable files (optional)
+      # 步骤15：签名可执行文件（可选，需配置 SIGN_BASE_URL 密钥）
+      - name: Sign Executable Files
         if: ${{ env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '' }}
         shell: bash
         run: |
-          # 安装签名所需依赖
           pip3 install requests argparse --upgrade
-          # 调用签名脚本
           BASE_URL=${{ secrets.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./rustdesk/
 
-      - name: Build self-extracted executable (portable)
+      # 步骤16：构建自解压绿色包
+      - name: Build Portable Self-Extracted Executable
         if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
         shell: bash
         run: |
-          # 清理旧配置
           sed -i '/dpiAware/d' res/manifest.xml
-          cd ./libs/portable
-          pip3 install -r requirements.txt --upgrade
-          # 生成绿色版自解压包
+          cd ./libs/portable && pip3 install -r requirements.txt --upgrade
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
-          cd ../../
-          # 整理最终产物
-          mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
+          cd ../../ && mkdir -p ./SignOutput
+          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-x64.exe
 
-      - name: Setup MSBuild (for MSI installer)
-        uses: microsoft/setup-msbuild@v2
-        if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
-
-      - name: Build MSI installer
+      # 步骤17：构建 MSI 安装包
+      - name: Build MSI Installer
         if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
         run: |
-          cd ./res/msi
-          # 预处理安装包配置
-          python preprocess.py --arp -d ../../rustdesk
-          # 恢复NuGet依赖
+          cd ./res/msi && python preprocess.py --arp -d ../../rustdesk
           nuget restore msi.sln
-          # 编译MSI安装包
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
-          # 移动到产物目录
-          mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.msi
-          # 打印哈希值，用于校验
-          sha256sum ../../SignOutput/rustdesk-*.msi
+          mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-${{ env.VERSION }}-x64.msi
         shell: bash
 
-      - name: Sign MSI/EXE (optional)
+      # 步骤18：签名 MSI/EXE 产物（可选）
+      - name: Sign Final Output Files
         if: ${{ env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '' }}
         shell: bash
         run: |
           BASE_URL=${{ secrets.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./SignOutput
 
+      # 步骤19：发布到 GitHub Release
       - name: Publish to GitHub Release
         if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: true  # 标记为预发布（避免误判为正式版）
-          tag_name: ${{ env.TAG_NAME }}  # 使用指定的标签
-          files: ./SignOutput/rustdesk-*.exe ./SignOutput/rustdesk-*.msi  # 发布的产物
-          fail_on_unmatched_files: false  # 允许部分产物缺失（如未编译MSI）
+          prerelease: true
+          tag_name: ${{ env.TAG_NAME }}
+          files: ./SignOutput/rustdesk-*.exe ./SignOutput/rustdesk-*.msi
+          fail_on_unmatched_files: false  # 允许部分产物缺失
