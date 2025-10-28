@@ -1,7 +1,7 @@
 name: Build Windows version of RustDesk
 
-# 关键新增：添加 workflow_dispatch 支持手动触发（显示 Run workflow 按钮）
-# 保留 workflow_call 支持被其他工作流调用
+# 新增：添加 workflow_dispatch 配置（支持手动触发，显示 Run workflow 按钮）
+# 保留原有 workflow_call 配置不变
 on:
   workflow_dispatch:
     inputs:
@@ -24,19 +24,20 @@ on:
         type: string
         default: "nightly"
 
+# 环境变量部分完全保留原有配置
 env:
   SCITER_RUST_VERSION: "1.75"
   RUST_VERSION: "1.75"
   LLVM_VERSION: "15.0.6"
   FLUTTER_VERSION: "3.24.5"
-  # 适配手动/调用两种触发：优先读取手动输入参数
+  # 适配手动/调用触发：优先读取手动输入参数（不影响原有调用逻辑）
   TAG_NAME: "${{ github.event.inputs.upload-tag || inputs.upload-tag }}"
   UPLOAD_ARTIFACT: "${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
   VERSION: "1.4.2"
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}"
-  # 仓库自定义变量（需在 GitHub Secrets 配置）
+  # 添加Repository secrets变量,用户在编译时使用
   APP_NAME: "${{ secrets.APP_NAME }}"
   RENDEZVOUS_SERVER: "${{ secrets.RENDEZVOUS_SERVER }}"
   RELAY_SERVER: "${{ secrets.RELAY_SERVER }}"
@@ -44,6 +45,7 @@ env:
   RS_PUB_KEY: "${{ secrets.RS_PUB_KEY }}"
   DEFAULT_PASSWORD: "${{ secrets.DEFAULT_PASSWORD }}"
 
+# Jobs 部分完全保留原有代码，未做任何修改
 jobs:
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
@@ -51,13 +53,13 @@ jobs:
   build-RustDeskTempTopMostWindow:
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     with:
-      # 适配手动/调用触发：传递正确的 upload-artifact 参数
-      upload-artifact: ${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}
+      upload-artifact: ${{ inputs.upload-artifact }}
       target: windows-2022
       configuration: Release
       platform: x64
       target_version: Windows10
-    # 移除多余的 strategy 配置（引用外部工作流时不支持该字段，避免语法错误）
+    strategy:
+      fail-fast: false
 
   build-for-windows-flutter:
     name: ${{ matrix.job.target }}
@@ -84,14 +86,13 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
-          submodules: recursive  # 拉取所有子模块（关键依赖）
+          submodules: recursive
 
       - name: Restore bridge files
-        uses: actions/download-artifact@v4  # 升级到最新版，修复下载兼容性问题
+        uses: actions/download-artifact@master
         with:
           name: bridge-artifact
           path: ./
-          overwrite: true  # 强制覆盖旧文件，避免缓存冲突
 
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1
@@ -104,25 +105,14 @@ jobs:
           channel: "stable"
           flutter-version: ${{ env.FLUTTER_VERSION }}
 
-      # 修复 Flutter 引擎下载：兼容低版本 PowerShell（避免 RetryCount 错误）
+      # https://github.com/flutter/flutter/issues/155685
       - name: Replace engine with rustdesk custom flutter engine
         run: |
           flutter doctor -v
           flutter precache --windows
-          # 用 WebClient 实现下载（兼容所有 PowerShell 版本）
-          $engineUrl = "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
-          $outputFile = "windows-x64-release.zip"
-          $webClient = New-Object System.Net.WebClient
-          $webClient.DownloadFile($engineUrl, $outputFile)
-          $webClient.Dispose()
-          # 解压并替换引擎
-          Expand-Archive -Path $outputFile -DestinationPath windows-x64-release -Force
-          $flutterEngineDir = "C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/"
-          if (-not (Test-Path $flutterEngineDir)) {
-            New-Item -ItemType Directory -Path $flutterEngineDir | Out-Null
-          }
-          mv -Force windows-x64-release/* $flutterEngineDir
-        shell: powershell  # 明确指定 powershell，避免版本兼容问题
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
 
       - name: Patch flutter
         shell: bash
@@ -171,53 +161,47 @@ jobs:
 
       - name: Build rustdesk
         run: |
-          # 编译主程序
+          # Windows: build RustDesk
           python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
 
-          # 下载 USB 驱动（兼容低版本 PowerShell）
-          $usbUrl = "https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip"
-          $usbClient = New-Object System.Net.WebClient
-          $usbClient.DownloadFile($usbUrl, "usbmmidd_v2.zip")
-          $usbClient.Dispose()
-          Expand-Archive -Path "usbmmidd_v2.zip" -DestinationPath . -Force
-          Remove-Item -Path usbmmidd_v2\Win32 -Recurse -ErrorAction SilentlyContinue
-          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat" -ErrorAction SilentlyContinue
+          # Download usbmmidd_v2.zip and extract it to ./rustdesk
+          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          Expand-Archive usbmmidd_v2.zip -DestinationPath .
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
           mv -Force .\usbmmidd_v2 ./rustdesk
 
-          # 下载打印机驱动（带错误处理）
+          # Download printer driver files and extract them to ./rustdesk
           try {
-            $driverUrl = "https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip"
-            $adapterUrl = "https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip"
-            $sumUrl = "https://github.com/rustdesk/hbb_common/releases/download/driver/sha256sums"
-            
-            $driverClient = New-Object System.Net.WebClient
-            $driverClient.DownloadFile($driverUrl, "rustdesk_printer_driver_v4-1.4.zip")
-            $driverClient.DownloadFile($adapterUrl, "printer_driver_adapter.zip")
-            $driverClient.DownloadFile($sumUrl, "sha256sums")
-            $driverClient.Dispose()
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip -OutFile rustdesk_printer_driver_v4-1.4.zip
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip -OutFile printer_driver_adapter.zip
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/sha256sums -OutFile sha256sums
 
-            # 校验哈希并移动文件
+            # Check and move the files
             $checksum_driver = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*rustdesk_printer_driver_v4-1.4\.zip$').Matches.Groups[1].Value
-            $downloadsum_driver = (Get-FileHash -Path "rustdesk_printer_driver_v4-1.4.zip" -Algorithm SHA256).Hash
+            $downloadsum_driver = Get-FileHash -Path rustdesk_printer_driver_v4-1.4.zip -Algorithm SHA256
             $checksum_adapter = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*printer_driver_adapter\.zip$').Matches.Groups[1].Value
-            $downloadsum_adapter = (Get-FileHash -Path "printer_driver_adapter.zip" -Algorithm SHA256).Hash
-
-            if ($checksum_driver -eq $downloadsum_driver -and $checksum_adapter -eq $downloadsum_adapter) {
-                Expand-Archive -Path "rustdesk_printer_driver_v4-1.4.zip" -DestinationPath . -Force
-                mkdir ./rustdesk/drivers -Force
+            $downloadsum_adapter = Get-FileHash -Path printer_driver_adapter.zip -Algorithm SHA256
+            if ($checksum_driver -eq $downloadsum_driver.Hash -and $checksum_adapter -eq $downloadsum_adapter.Hash) {
+                Write-Output "rustdesk_printer_driver_v4-1.4, checksums match, extract the file."
+                Expand-Archive rustdesk_printer_driver_v4-1.4.zip -DestinationPath .
+                mkdir ./rustdesk/drivers
                 mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
-                Expand-Archive -Path "printer_driver_adapter.zip" -DestinationPath . -Force
+                Expand-Archive printer_driver_adapter.zip -DestinationPath .
                 mv -Force .\printer_driver_adapter.dll ./rustdesk
+            } elseif ($checksum_driver -ne $downloadsum_driver.Hash) {
+                Write-Output "rustdesk_printer_driver_v4-1.4, checksums do not match, ignore the file."
             } else {
-                Write-Output "rustdesk_printer_driver_v4-1.4 or adapter checksums do not match, ignore."
+                Write-Output "printer_driver_adapter.dll, checksums do not match, ignore the file."
             }
           } catch {
-              Write-Host "Ignore the printer driver error: $_"
+              Write-Host "Ingore the printer driver error."
           }
-        shell: powershell
 
       - name: find Runner.res
+        # Windows: find Runner.res (compiled from ./flutter/windows/runner/Runner.rc), copy to ./Runner.res
+        # Runner.rc does not contain actual version, but Runner.res does
         continue-on-error: true
         shell: bash
         run: |
@@ -232,15 +216,15 @@ jobs:
           fi
 
       - name: Download RustDeskTempTopMostWindow artifacts
-        uses: actions/download-artifact@v4
-        if: ${{ env.UPLOAD_ARTIFACT == 'true' }}
+        uses: actions/download-artifact@master
+        if: ${{ inputs.upload-artifact }}
         with:
           name: topmostwindow-artifacts
           path: "./rustdesk"
 
       - name: Upload unsigned
         if: env.UPLOAD_ARTIFACT == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@master
         with:
           name: rustdesk-unsigned-windows-${{ matrix.job.arch }}
           path: rustdesk
@@ -276,7 +260,6 @@ jobs:
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.msi
           sha256sum ../../SignOutput/rustdesk-*.msi
-        shell: bash
 
       - name: Sign rustdesk self-extracted file
         if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != ''
@@ -285,7 +268,7 @@ jobs:
           BASE_URL=${{ secrets.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./SignOutput
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v2  # 升级到最新版，修复发布兼容性问题
+        uses: softprops/action-gh-release@v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
           prerelease: true
@@ -293,4 +276,3 @@ jobs:
           files: |
             ./SignOutput/rustdesk-*.msi
             ./SignOutput/rustdesk-*.exe
-          fail_on_unmatched_files: false  # 避免文件缺失导致发布失败
