@@ -66,7 +66,7 @@ Widget build(BuildContext context) {
         // ========== 新增：两行文字（控制顶部边距，不贴顶） ==========
         Padding(
           // top: 15 控制文字与顶部的距离，避免贴顶；left:20 与ID面板左对齐
-          padding: const EdgeInsets.only(top: 15, left: 10, right: 20),
+          padding: const EdgeInsets.only(top: 15, left: 15, right: 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, // 文字左对齐
             children: [
