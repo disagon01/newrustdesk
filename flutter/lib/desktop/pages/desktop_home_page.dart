@@ -70,9 +70,9 @@ Widget build(BuildContext context) {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, // 文字左对齐
             children: [
-              // 第一行：QuickDesk远程协助版（稍大字体）
+              // 第一行：QuickDesk协助版（稍大字体）
               Text(
-                "QuickDesk远程协助版",
+                "QuickDesk协助版",
                 style: TextStyle(
                   fontSize: 16, // 第一行字体大小，比第二行大2px
                   color: Theme.of(context).textTheme.titleLarge?.color, // 跟随主题色
@@ -82,7 +82,7 @@ Widget build(BuildContext context) {
               SizedBox(height: 5), // 两行文字之间的间距
               // 第二行：请把ID发给客服即可！（稍小字体）
               Text(
-                "请把下方的ID发给客服即可",
+                "请把下方的ID发给客服即可！",
                 style: TextStyle(
                   fontSize: 12, // 第二行字体大小，比第一行小
                   color: Theme.of(context).textTheme.titleLarge?.color?.withOpacity(0.8), // 颜色稍浅，区分层级
