@@ -94,8 +94,6 @@ Widget build(BuildContext context) {
         SizedBox(height: 8), // 文字区域与下方ID面板的间距，可按需调整
         // ========== 原有代码：ID面板及后续组件 ==========
         buildIDBoard(context),
-        SizedBox(height: 10),
-        buildPasswordBoard(context),
         Spacer(),
         OnlineStatusWidget(
           onSvcStatusChanged: () {
@@ -115,8 +113,6 @@ Widget build(BuildContext context) {
   return Column(
     children: [
       buildIDBoard(context),
-      SizedBox(height: 10),
-      buildPasswordBoard(context),
       Spacer(),
       OnlineStatusWidget(
         onSvcStatusChanged: () {
