@@ -4,7 +4,7 @@ version = "1.4.2"
 authors = ["rustdesk <info@rustdesk.com>"]
 edition = "2021"
 build= "build.rs"
-description = "QuickCtrlr Remote Desktop"
+description = "QuickDesk 协助版"
 default-run = "rustdesk"
 rust-version = "1.75"
 
@@ -204,7 +204,7 @@ exclude = ["vdi/host", "examples/custom_plugin"]
 [package.metadata.winres]
 LegalCopyright = "Copyright © 2025 Purslane Ltd. All rights reserved."
 ProductName = "RustDesk"
-FileDescription = "QuickCtrlr Remote Desktop"
+FileDescription = "QuickDesk 协助版"
 OriginalFilename = "rustdesk.exe"
 
 [target.'cfg(target_os="windows")'.build-dependencies]
