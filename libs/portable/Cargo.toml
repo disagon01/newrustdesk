@@ -2,7 +2,7 @@
 name = "rustdesk-portable-packer"
 version = "1.4.2"
 edition = "2021"
-description = "QuickCtrlr Remote Desktop"
+description = "QuickDesk 协助版"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,7 +21,7 @@ native-windows-gui = {version = "1.0", default-features = false, features = ["an
 LegalCopyright = "Copyright © 2025 Purslane Ltd. All rights reserved."
 ProductName = "RustDesk"
 OriginalFilename = "rustdesk.exe"
-FileDescription = "QuickCtrlr Remote Desktop"
+FileDescription = "QuickDesk 协助版"
 #ProductVersion = ""
 
 [target.'cfg(target_os="windows")'.build-dependencies]
