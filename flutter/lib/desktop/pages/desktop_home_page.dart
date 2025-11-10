@@ -80,7 +80,7 @@ Widget build(BuildContext context) {
                 ),
               ),
               SizedBox(height: 5), // 两行文字之间的间距
-              // 第二行：请把下方的ID发给客服即可！（稍小字体）
+              // 第二行：请把ID发给客服即可！（稍小字体）
               Text(
                 "请把下方的ID发给客服即可！",
                 style: TextStyle(
@@ -131,98 +131,72 @@ Widget build(BuildContext context) {
   }
 
 buildIDBoard(BuildContext context) {
-  final model = gFFI.serverModel;
-  return Container(
-    margin: const EdgeInsets.only(left: 20, right: 11),
-    // 增加高度以容纳退出按钮
-    height: 100,
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Container(
-          width: 2,
-          decoration: const BoxDecoration(color: MyTheme.accent),
-        ).marginOnly(top: 5),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(left: 7),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ID 标题行（原有）
-                Container(
-                  height: 25,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        translate("ID"),
+    final model = gFFI.serverModel;
+    return Container(
+      margin: const EdgeInsets.only(left: 20, right: 11),
+      height: 57,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Container(
+            width: 2,
+            decoration: const BoxDecoration(color: MyTheme.accent),
+          ).marginOnly(top: 5),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 7),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    height: 25,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          translate("ID"),
+                          style: TextStyle(
+                              fontSize: 14,
+                              color: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.color
+                                  ?.withOpacity(0.5)),
+                        ).marginOnly(top: 5),
+                        buildPopupMenu(context) // 这里调用的就是三条杠按钮的构建方法
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: GestureDetector(
+                      onDoubleTap: () {
+                        Clipboard.setData(
+                            ClipboardData(text: model.serverId.text));
+                        showToast(translate("Copied"));
+                      },
+                      child: TextFormField(
+                        controller: model.serverId,
+                        readOnly: true,
+                        decoration: InputDecoration(
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.only(top: 10, bottom: 10),
+                        ),
                         style: TextStyle(
-                            fontSize: 14,
-                            color: Theme.of(context)
-                                .textTheme
-                                .titleLarge
-                                ?.color
-                                ?.withOpacity(0.5)),
-                      ).marginOnly(top: 5),
-                      buildPopupMenu(context) // 隐藏的三条杠按钮
-                    ],
-                  ),
-                ),
-                // ID 输入框（原有）
-                Flexible(
-                  child: GestureDetector(
-                    onDoubleTap: () {
-                      Clipboard.setData(
-                          ClipboardData(text: model.serverId.text));
-                      showToast(translate("Copied"));
-                    },
-                    child: TextFormField(
-                      controller: model.serverId,
-                      readOnly: true,
-                      decoration: InputDecoration(
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.only(top: 10, bottom: 10),
-                      ),
-                      style: TextStyle(
-                        fontSize: 22,
-                      ),
-                    ).workaroundFreezeLinuxMint(),
-                  ),
-                ),
-                // 新增：退出按钮
-                SizedBox(height: 8), // 与 ID 输入框的间距
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: FixedWidthButton(
-                    width: 120,
-                    padding: 6,
-                    text: translate('退出'),
-                    textColor: Colors.white,
-                    backgroundColor: Color(0xFFE53E3E), // 红色主题，突出退出功能
-                    radius: 6,
-                    textSize: 12,
-                    onTap: () {
-                      // 退出逻辑：适配全平台
-                      SystemNavigator.pop();
-                      if (isWindows || isLinux) {
-                        exit(0);
-                      } else if (isMacOS) {
-                        exit(0);
-                      }
-                    },
-                  ),
-                ),
-              ],
+                          fontSize: 22,
+                        ),
+                      ).workaroundFreezeLinuxMint(),
+                    ),
+                  )
+                ],
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
-}
+        ],
+      ),
+    );
+  }
 
   /// 隐藏顶部三条杠设置按钮：直接返回空容器，不渲染任何内容
   Widget buildPopupMenu(BuildContext context) {
@@ -471,4 +445,519 @@ buildIDBoard(BuildContext context) {
         // Check is SELinux enforcing, but show user a tip of is SELinux enabled for simple.
         final keyShowSelinuxHelpTip = "show-selinux-help-tip";
         if (bind.mainGetLocalOption(key: keyShowSelinuxHelpTip) != 'N') {
-          Linux
+          LinuxCards.add(buildInstallCard(
+            "Warning",
+            "selinux_tip",
+            "",
+            () async {},
+            marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
+            help: 'Help',
+            link:
+                'https://iinx.cn',
+            closeButton: true,
+            closeOption: keyShowSelinuxHelpTip,
+          ));
+        }
+      }
+      if (bind.mainCurrentIsWayland()) {
+        LinuxCards.add(buildInstallCard(
+            "Warning", "wayland_experiment_tip", "", () async {},
+            marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
+            help: 'Help',
+            link: 'https://iinx.cn'));
+      } else if (bind.mainIsLoginWayland()) {
+        LinuxCards.add(buildInstallCard("Warning",
+            "Login screen using Wayland is not supported", "", () async {},
+            marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
+            help: 'Help',
+            link: 'https://iinx.cn'));
+      }
+      if (LinuxCards.isNotEmpty) {
+        return Column(
+          children: LinuxCards,
+        );
+      }
+    }
+    if (bind.isIncomingOnly()) {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: OutlinedButton(
+          onPressed: () {
+            SystemNavigator.pop(); // Close the application
+            // https://github.com/flutter/flutter/issues/66631
+            if (isWindows) {
+              exit(0);
+            }
+          },
+          child: Text(translate('Quit')),
+        ),
+      ).marginAll(14);
+    }
+    return Container();
+  }
+
+  Widget buildInstallCard(String title, String content, String btnText,
+      GestureTapCallback onPressed,
+      {double marginTop = 20.0,
+      String? help,
+      String? link,
+      bool? closeButton,
+      String? closeOption}) {
+    if (bind.mainGetBuildinOption(key: kOptionHideHelpCards) == 'Y' &&
+        content != 'install_daemon_tip') {
+      return const SizedBox();
+    }
+    void closeCard() async {
+      if (closeOption != null) {
+        await bind.mainSetLocalOption(key: closeOption, value: 'N');
+        if (bind.mainGetLocalOption(key: closeOption) == 'N') {
+          setState(() {
+            isCardClosed = true;
+          });
+        }
+      } else {
+        setState(() {
+          isCardClosed = true;
+        });
+      }
+    }
+
+    return Stack(
+      children: [
+        Container(
+          margin: EdgeInsets.fromLTRB(
+              0, marginTop, 0, bind.isIncomingOnly() ? marginTop : 0),
+          child: Container(
+              decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color.fromARGB(255, 226, 66, 188),
+                  Color.fromARGB(255, 244, 114, 124),
+                ],
+              )),
+              padding: EdgeInsets.all(20),
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: (title.isNotEmpty
+                          ? <Widget>[
+                              Center(
+                                  child: Text(
+                                translate(title),
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15),
+                              ).marginOnly(bottom: 6)),
+                            ]
+                          : <Widget>[]) +
+                      <Widget>[
+                        if (content.isNotEmpty)
+                          Text(
+                            translate(content),
+                            style: TextStyle(
+                                height: 1.5,
+                                color: Colors.white,
+                                fontWeight: FontWeight.normal,
+                                fontSize: 13),
+                          ).marginOnly(bottom: 20)
+                      ] +
+                      (btnText.isNotEmpty
+                          ? <Widget>[
+                              Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    FixedWidthButton(
+                                      width: 150,
+                                      padding: 8,
+                                      isOutline: true,
+                                      text: translate(btnText),
+                                      textColor: Colors.white,
+                                      borderColor: Colors.white,
+                                      textSize: 20,
+                                      radius: 10,
+                                      onTap: onPressed,
+                                    )
+                                  ])
+                            ]
+                          : <Widget>[]) +
+                      (help != null
+                          ? <Widget>[
+                              Center(
+                                  child: InkWell(
+                                      onTap: () async =>
+                                          await launchUrl(Uri.parse(link!)),
+                                      child: Text(
+                                        translate(help),
+                                        style: TextStyle(
+                                            decoration:
+                                                TextDecoration.underline,
+                                            color: Colors.white,
+                                            fontSize: 12),
+                                      )).marginOnly(top: 6)),
+                            ]
+                          : <Widget>[]))),
+        ),
+        if (closeButton != null && closeButton == true)
+          Positioned(
+            top: 18,
+            right: 0,
+            child: IconButton(
+              icon: Icon(
+                Icons.close,
+                color: Colors.white,
+                size: 20,
+              ),
+              onPressed: closeCard,
+            ),
+          ),
+      ],
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
+      await gFFI.serverModel.fetchID();
+      final error = await bind.mainGetError();
+      if (systemError != error) {
+        systemError = error;
+        setState(() {});
+      }
+      final v = await mainGetBoolOption(kOptionStopService);
+      if (v != svcStopped.value) {
+        svcStopped.value = v;
+        setState(() {});
+      }
+      if (watchIsCanScreenRecording) {
+        if (bind.mainIsCanScreenRecording(prompt: false)) {
+          watchIsCanScreenRecording = false;
+          setState(() {});
+        }
+      }
+      if (watchIsProcessTrust) {
+        if (bind.mainIsProcessTrusted(prompt: false)) {
+          watchIsProcessTrust = false;
+          setState(() {});
+        }
+      }
+      if (watchIsInputMonitoring) {
+        if (bind.mainIsCanInputMonitoring(prompt: false)) {
+          watchIsInputMonitoring = false;
+          // Do not notify for now.
+          // Monitoring may not take effect until the process is restarted.
+          // rustDeskWinManager.call(
+          //     WindowType.RemoteDesktop, kWindowDisableGrabKeyboard, '');
+          setState(() {});
+        }
+      }
+      if (watchIsCanRecordAudio) {
+        if (isMacOS) {
+          Future.microtask(() async {
+            if ((await osxCanRecordAudio() ==
+                PermissionAuthorizeType.authorized)) {
+              watchIsCanRecordAudio = false;
+              setState(() {});
+            }
+          });
+        } else {
+          watchIsCanRecordAudio = false;
+          setState(() {});
+        }
+      }
+    });
+    Get.put<RxBool>(svcStopped, tag: 'stop-service');
+    rustDeskWinManager.registerActiveWindowListener(onActiveWindowChanged);
+
+    screenToMap(window_size.Screen screen) => {
+          'frame': {
+            'l': screen.frame.left,
+            't': screen.frame.top,
+            'r': screen.frame.right,
+            'b': screen.frame.bottom,
+          },
+          'visibleFrame': {
+            'l': screen.visibleFrame.left,
+            't': screen.visibleFrame.top,
+            'r': screen.visibleFrame.right,
+            'b': screen.visibleFrame.bottom,
+          },
+          'scaleFactor': screen.scaleFactor,
+        };
+
+    rustDeskWinManager.setMethodHandler((call, fromWindowId) async {
+      debugPrint(
+          "[Main] call ${call.method} with args ${call.arguments} from window $fromWindowId");
+      if (call.method == kWindowMainWindowOnTop) {
+        windowOnTop(null);
+      } else if (call.method == kWindowGetWindowInfo) {
+        final screen = (await window_size.getWindowInfo()).screen;
+        if (screen == null) {
+          return '';
+        } else {
+          return jsonEncode(screenToMap(screen));
+        }
+      } else if (call.method == kWindowGetScreenList) {
+        return jsonEncode(
+            (await window_size.getScreenList()).map(screenToMap).toList());
+      } else if (call.method == kWindowActionRebuild) {
+        reloadCurrentWindow();
+      } else if (call.method == kWindowEventShow) {
+        await rustDeskWinManager.registerActiveWindow(call.arguments["id"]);
+      } else if (call.method == kWindowEventHide) {
+        await rustDeskWinManager.unregisterActiveWindow(call.arguments['id']);
+      } else if (call.method == kWindowConnect) {
+        await connectMainDesktop(
+          call.arguments['id'],
+          isFileTransfer: call.arguments['isFileTransfer'],
+          isViewCamera: call.arguments['isViewCamera'],
+          isTerminal: call.arguments['isTerminal'],
+          isTcpTunneling: call.arguments['isTcpTunneling'],
+          isRDP: call.arguments['isRDP'],
+          password: call.arguments['password'],
+          forceRelay: call.arguments['forceRelay'],
+          connToken: call.arguments['connToken'],
+        );
+      } else if (call.method == kWindowEventMoveTabToNewWindow) {
+        final args = call.arguments.split(',');
+        int? windowId;
+        try {
+          windowId = int.parse(args[0]);
+        } catch (e) {
+          debugPrint("Failed to parse window id '${call.arguments}': $e");
+        }
+        WindowType? windowType;
+        try {
+          windowType = WindowType.values.byName(args[3]);
+        } catch (e) {
+          debugPrint("Failed to parse window type '${call.arguments}': $e");
+        }
+        if (windowId != null && windowType != null) {
+          await rustDeskWinManager.moveTabToNewWindow(
+              windowId, args[1], args[2], windowType);
+        }
+      } else if (call.method == kWindowEventOpenMonitorSession) {
+        final args = jsonDecode(call.arguments);
+        final windowId = args['window_id'] as int;
+        final peerId = args['peer_id'] as String;
+        final display = args['display'] as int;
+        final displayCount = args['display_count'] as int;
+        final windowType = args['window_type'] as int;
+        final screenRect = parseParamScreenRect(args);
+        await rustDeskWinManager.openMonitorSession(
+            windowId, peerId, display, displayCount, screenRect, windowType);
+      } else if (call.method == kWindowEventRemoteWindowCoords) {
+        final windowId = int.tryParse(call.arguments);
+        if (windowId != null) {
+          return jsonEncode(
+              await rustDeskWinManager.getOtherRemoteWindowCoords(windowId));
+        }
+      }
+    });
+    _uniLinksSubscription = listenUniLinks();
+
+    if (bind.isIncomingOnly()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _updateWindowSize();
+      });
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+  windowManager.setSize(Size(218, 285));
+});
+
+if (bind.isIncomingOnly()) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _updateWindowSize();
+  });
+}
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  _updateWindowSize() {
+    RenderObject? renderObject = _childKey.currentContext?.findRenderObject();
+    if (renderObject == null) {
+      return;
+    }
+    if (renderObject is RenderBox) {
+      final size = renderObject.size;
+      if (size != imcomingOnlyHomeSize) {
+        imcomingOnlyHomeSize = size;
+        windowManager.setSize(getIncomingOnlyHomeSize());
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _uniLinksSubscription?.cancel();
+    Get.delete<RxBool>(tag: 'stop-service');
+    _updateTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      shouldBeBlocked(_block, canBeBlocked);
+    }
+  }
+
+  Widget buildPluginEntry() {
+    final entries = PluginUiManager.instance.entries.entries;
+    return Offstage(
+      offstage: entries.isEmpty,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ...entries.map((entry) {
+            return entry.value;
+          })
+        ],
+      ),
+    );
+  }
+}
+
+void setPasswordDialog({VoidCallback? notEmptyCallback}) async {
+  final pw = await bind.mainGetPermanentPassword();
+  final p0 = TextEditingController(text: pw);
+  final p1 = TextEditingController(text: pw);
+  var errMsg0 = "";
+  var errMsg1 = "";
+  final RxString rxPass = pw.trim().obs;
+  final rules = [
+    DigitValidationRule(),
+    UppercaseValidationRule(),
+    LowercaseValidationRule(),
+    // SpecialCharacterValidationRule(),
+    MinCharactersValidationRule(8),
+  ];
+  final maxLength = bind.mainMaxEncryptLen();
+
+  gFFI.dialogManager.show((setState, close, context) {
+    submit() {
+      setState(() {
+        errMsg0 = "";
+        errMsg1 = "";
+      });
+      final pass = p0.text.trim();
+      if (pass.isNotEmpty) {
+        final Iterable violations = rules.where((r) => !r.validate(pass));
+        if (violations.isNotEmpty) {
+          setState(() {
+            errMsg0 =
+                '${translate('Prompt')}: ${violations.map((r) => r.name).join(', ')}';
+          });
+          return;
+        }
+      }
+      if (p1.text.trim() != pass) {
+        setState(() {
+          errMsg1 =
+              '${translate('Prompt')}: ${translate("The confirmation is not identical.")}';
+        });
+        return;
+      }
+      bind.mainSetPermanentPassword(password: pass);
+      if (pass.isNotEmpty) {
+        notEmptyCallback?.call();
+      }
+      close();
+    }
+
+    return CustomAlertDialog(
+      title: Text(translate("Set Password")),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 500),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(
+              height: 8.0,
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    obscureText: true,
+                    decoration: InputDecoration(
+                        labelText: translate('Password'),
+                        errorText: errMsg0.isNotEmpty ? errMsg0 : null),
+                    controller: p0,
+                    autofocus: true,
+                    onChanged: (value) {
+                      rxPass.value = value.trim();
+                      setState(() {
+                        errMsg0 = '';
+                      });
+                    },
+                    maxLength: maxLength,
+                  ).workaroundFreezeLinuxMint(),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: PasswordStrengthIndicator(password: rxPass)),
+              ],
+            ).marginSymmetric(vertical: 8),
+            const SizedBox(
+              height: 8.0,
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    obscureText: true,
+                    decoration: InputDecoration(
+                        labelText: translate('Confirmation'),
+                        errorText: errMsg1.isNotEmpty ? errMsg1 : null),
+                    controller: p1,
+                    onChanged: (value) {
+                      setState(() {
+                        errMsg1 = '';
+                      });
+                    },
+                    maxLength: maxLength,
+                  ).workaroundFreezeLinuxMint(),
+                ),
+              ],
+            ),
+            const SizedBox(
+              height: 8.0,
+            ),
+            Obx(() => Wrap(
+                  runSpacing: 8,
+                  spacing: 4,
+                  children: rules.map((e) {
+                    var checked = e.validate(rxPass.value.trim());
+                    return Chip(
+                        label: Text(
+                          e.name,
+                          style: TextStyle(
+                              color: checked
+                                  ? const Color(0xFF0A9471)
+                                  : Color.fromARGB(255, 198, 86, 157)),
+                        ),
+                        backgroundColor: checked
+                            ? const Color(0xFFD0F7ED)
+                            : Color.fromARGB(255, 247, 205, 232));
+                  }).toList(),
+                ))
+          ],
+        ),
+      ),
+      actions: [
+        dialogButton("Cancel", onPressed: close, isOutline: true),
+        dialogButton("OK", onPressed: submit),
+      ],
+      onSubmit: submit,
+      onCancel: close,
+    );
+  });
+}
