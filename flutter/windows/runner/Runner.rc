@@ -90,7 +90,7 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "Disvison Ltd" "\0"
-            VALUE "FileDescription", "QuickDesk 协助版" "\0"
+            VALUE "FileDescription", "QuickDesk Remote Desktop" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "rustdesk" "\0"
             VALUE "LegalCopyright", "Copyright © 2025 Disvison Ltd. All rights reserved." "\0"
