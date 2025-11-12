@@ -3557,8 +3557,9 @@ Widget loadLogo() {
       });
 }
 
-/*  // 开始注释
 Widget loadIcon(double size) {
+  // 注释掉原有加载图标的逻辑
+  /*
   return Image.asset('assets/icon.png',
       width: size,
       height: size,
@@ -3567,8 +3568,11 @@ Widget loadIcon(double size) {
             width: size,
             height: size,
           ));
+  */
+  
+  // 返回空Widget
+  return SizedBox.shrink();
 }
-*/  // 结束注释
 
 var imcomingOnlyHomeSize = Size(280, 300);
 Size getIncomingOnlyHomeSize() {
