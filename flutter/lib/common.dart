@@ -3557,6 +3557,7 @@ Widget loadLogo() {
       });
 }
 
+/*  // 开始注释
 Widget loadIcon(double size) {
   return Image.asset('assets/icon.png',
       width: size,
@@ -3567,6 +3568,7 @@ Widget loadIcon(double size) {
             height: size,
           ));
 }
+*/  // 结束注释
 
 var imcomingOnlyHomeSize = Size(280, 300);
 Size getIncomingOnlyHomeSize() {
