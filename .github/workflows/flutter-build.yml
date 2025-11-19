@@ -1,6 +1,20 @@
 name: Build the flutter version of the RustDesk
 
+# 新增：添加 workflow_dispatch 配置（支持手动触发，显示 Run workflow 按钮）
+# 保留原有 workflow_call 配置不变
 on:
+  workflow_dispatch:
+    inputs:
+      upload-artifact:
+        type: boolean
+        description: "Whether to upload build artifacts (default: true)"
+        required: false
+        default: true
+      upload-tag:
+        type: string
+        description: "Tag name for release (e.g. nightly, v1.4.2, default: nightly)"
+        required: false
+        default: "nightly"
   workflow_call:
     inputs:
       upload-artifact:
@@ -29,7 +43,8 @@ env:
   ANDROID_FLUTTER_VERSION: "3.24.5"
   # for arm64 linux because official Dart SDK does not work
   FLUTTER_ELINUX_VERSION: "3.16.9"
-  TAG_NAME: "${{ inputs.upload-tag }}"
+  # 适配手动/调用触发：优先读取手动输入参数，无则读取工作流调用参数
+  TAG_NAME: "${{ github.event.inputs.upload-tag || inputs.upload-tag }}"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   # vcpkg version: 2025.08.27
   # If we change the `VCPKG COMMIT_ID`, please remember:
@@ -44,7 +59,8 @@ env:
   #signing keys env variable checks
   ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
   MACOS_P12_BASE64: "${{ secrets.MACOS_P12_BASE64 }}"
-  UPLOAD_ARTIFACT: "${{ inputs.upload-artifact }}"
+  # 适配手动/调用触发：优先读取手动输入参数，无则读取工作流调用参数
+  UPLOAD_ARTIFACT: "${{ github.event.inputs.upload-artifact || inputs.upload-artifact }}"
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}"
   #添加Repository secrets变量,用户在编译时使用
   APP_NAME: "${{ secrets.APP_NAME }}"
@@ -1332,19 +1348,3 @@ jobs:
               on: ubuntu-22.04,
               deb_arch: amd64,
               vcpkg-triplet: x64-linux,
-            }
-          - {
-              arch: aarch64,
-              target: aarch64-unknown-linux-gnu,
-              distro: ubuntu18.04,
-              on: ubuntu-22.04-arm,
-              deb_arch: arm64,
-              vcpkg-triplet: arm64-linux,
-            }
-    steps:
-      - name: Export GitHub Actions cache environment variables
-        uses: actions/github-script@v6
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
