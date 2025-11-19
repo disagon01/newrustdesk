@@ -22,6 +22,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:path_provider/path_provider.dart'; // 新增：文件存储依赖
 
 import 'common.dart';
 import 'consts.dart';
@@ -32,10 +33,16 @@ import 'models/platform_model.dart';
 import 'package:flutter_hbb/plugin/handlers.dart'
     if (dart.library.html) 'package:flutter_hbb/web/plugin/handlers.dart';
 
+/// 新增：注册验证的MethodChannel
+const MethodChannel _regChannel = MethodChannel('rustdesk/reg');
+
 /// Basic window and launch properties.
 int? kWindowId;
 WindowType? kWindowType;
 late List<String> kBootArgs;
+
+/// 新增：全局注册状态标识
+bool _isRegistered = false;
 
 Future<void> main(List<String> args) async {
   earlyAssert();
@@ -43,6 +50,16 @@ Future<void> main(List<String> args) async {
 
   debugPrint("launch args: $args");
   kBootArgs = List.from(args);
+
+  // 新增：先执行注册验证（仅移动端，桌面端默认跳过）
+  if (isMobile) {
+    _isRegistered = await _checkRegistration();
+    if (!_isRegistered) {
+      // 未注册则启动注册界面
+      runApp(const RegistrationApp());
+      return;
+    }
+  }
 
   if (!isDesktop) {
     runMobileApp();
@@ -117,6 +134,49 @@ Future<void> main(List<String> args) async {
     }
     runMainApp(true);
   }
+}
+
+/// 新增：检查注册状态
+Future<bool> _checkRegistration() async {
+  try {
+    // 仅Android端调用原生方法，iOS可根据需求扩展
+    if (!isAndroid) return true;
+    final String machineCode = await _regChannel.invokeMethod('getMachineCode');
+    final String savedRegCode = await _readRegCode();
+    // 从环境变量获取密钥，也可替换为固定密钥（需谨慎）
+    final String secretKey = const String.fromEnvironment('SECRET_KEY', defaultValue: 'default_rustdesk_secret');
+    final bool valid = await _regChannel.invokeMethod(
+      'verifyRegCode',
+      {
+        'regCode': savedRegCode,
+        'machineCode': machineCode,
+        'secretKey': secretKey
+      },
+    );
+    return valid;
+  } catch (e) {
+    debugPrint("注册验证失败: $e");
+    return false;
+  }
+}
+
+/// 新增：从本地读取保存的注册码
+Future<String> _readRegCode() async {
+  try {
+    final directory = await getApplicationDocumentsDirectory();
+    final file = File('${directory.path}/rustdesk_regcode.txt');
+    return file.exists() ? await file.readAsString() : "";
+  } catch (e) {
+    debugPrint("读取注册码失败: $e");
+    return "";
+  }
+}
+
+/// 新增：保存注册码到本地
+Future<void> _saveRegCode(String regCode) async {
+  final directory = await getApplicationDocumentsDirectory();
+  final file = File('${directory.path}/rustdesk_regcode.txt');
+  await file.writeAsString(regCode);
 }
 
 Future<void> initEnv(String appType) async {
@@ -592,4 +652,169 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
       }
     },
   );
+}
+
+/// 新增：注册界面根组件
+class RegistrationApp extends StatelessWidget {
+  const RegistrationApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'RustDesk 注册验证',
+      theme: MyTheme.lightTheme, // 复用原有主题
+      darkTheme: MyTheme.darkTheme,
+      themeMode: MyTheme.currentThemeMode(),
+      home: const RegistrationForm(),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: supportedLocales,
+    );
+  }
+}
+
+/// 新增：注册表单组件
+class RegistrationForm extends StatefulWidget {
+  const RegistrationForm({super.key});
+
+  @override
+  State<RegistrationForm> createState() => _RegistrationFormState();
+}
+
+class _RegistrationFormState extends State<RegistrationForm> {
+  final TextEditingController _regCodeController = TextEditingController();
+  String _machineCode = "";
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMachineCode();
+  }
+
+  /// 加载设备机器码
+  Future<void> _loadMachineCode() async {
+    try {
+      setState(() => _isLoading = true);
+      final String code = await _regChannel.invokeMethod('getMachineCode');
+      setState(() => _machineCode = code);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('获取机器码失败: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  /// 验证注册码并保存
+  Future<void> _verifyAndSaveRegCode() async {
+    final regCode = _regCodeController.text.trim();
+    if (regCode.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入注册码')),
+      );
+      return;
+    }
+
+    if (_machineCode.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('机器码未加载完成')),
+      );
+      return;
+    }
+
+    try {
+      setState(() => _isLoading = true);
+      final String secretKey = const String.fromEnvironment('SECRET_KEY', defaultValue: 'default_rustdesk_secret');
+      final bool valid = await _regChannel.invokeMethod(
+        'verifyRegCode',
+        {
+          'regCode': regCode,
+          'machineCode': _machineCode,
+          'secretKey': secretKey
+        },
+      );
+
+      if (valid) {
+        await _saveRegCode(regCode);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('注册验证成功，正在进入应用...')),
+        );
+        // 验证成功后重启应用主流程
+        Future.delayed(const Duration(seconds: 1), () {
+          runMobileApp();
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('注册码无效')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('验证失败: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('RustDesk 注册验证')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              '您的设备机器码',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            _isLoading
+                ? const CircularProgressIndicator()
+                : Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(_machineCode.isEmpty ? '加载中...' : _machineCode),
+                  ),
+            const SizedBox(height: 24),
+            const Text(
+              '请输入注册码',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _regCodeController,
+              decoration: const InputDecoration(
+                hintText: '请输入24位注册码',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              maxLength: 24,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _isLoading ? null : _verifyAndSaveRegCode,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                textStyle: const TextStyle(fontSize: 16),
+              ),
+              child: _isLoading
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : const Text('验证并进入应用'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
