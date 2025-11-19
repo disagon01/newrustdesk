@@ -9,6 +9,7 @@ import shutil
 import hashlib
 import argparse
 import sys
+import subprocess  # 新增：导入subprocess模块
 from pathlib import Path
 
 windows = platform.platform().startswith('Windows')
@@ -25,6 +26,18 @@ else:
 flutter_build_dir_2 = f'flutter/{flutter_build_dir}'
 skip_cargo = False
 
+# 新增：定义链接Windows库的函数
+def link_windows_libs():
+    """链接Windows所需的WMI/COM库"""
+    if os.name == 'nt':
+        # 为cc-rs添加链接参数
+        os.environ['CFLAGS'] = '/EHsc /D_WIN32_WINNT=0x0601'
+        os.environ['LDFLAGS'] = 'wbemuuid.lib ole32.lib oleaut32.lib crypt32.lib'
+        # 执行cargo build时传递链接参数
+        subprocess.run([
+            'cargo', 'build', '--features', 'hwcodec,vram,flutter', '--lib', '--release',
+            '--config', 'target.x86_64-pc-windows-msvc.linker = "cl.exe"'
+        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 def get_deb_arch() -> str:
     custom_arch = os.environ.get("DEB_ARCH")
@@ -44,14 +57,12 @@ def system2(cmd):
         sys.stderr.write(f"Error occurred when executing: `{cmd}`. Exiting.\n")
         sys.exit(-1)
 
-
 def get_version():
     with open("Cargo.toml", encoding="utf-8") as fh:
         for line in fh:
             if line.startswith("version"):
                 return line.replace("version", "").replace("=", "").replace('"', '').strip()
     return ''
-
 
 def parse_rc_features(feature):
     available_features = {}
@@ -92,7 +103,6 @@ def parse_rc_features(feature):
         return apply_features
     else:
         raise Exception(f'Unsupported features param {feature}')
-
 
 def make_parser():
     parser = argparse.ArgumentParser(description='Build script.')
@@ -152,7 +162,6 @@ def make_parser():
         )
     return parser
 
-
 # Generate build script for docker
 #
 # it assumes all build dependencies are installed in environments
@@ -187,7 +196,6 @@ def generate_build_script_for_docker():
         ''')
     system2("chmod +x /tmp/build.sh")
     system2("bash /tmp/build.sh")
-
 
 # Downloading third party resources is deprecated.
 # We can use this function in an offline build environment.
@@ -248,7 +256,6 @@ def download_extract_features(features, res_dir):
                 os.remove(download_filename)
                 print(f'{feat} extract end')
 
-
 def external_resources(flutter, args, res_dir):
     features = parse_rc_features(args.feature)
     if not features:
@@ -270,7 +277,6 @@ def external_resources(flutter, args, res_dir):
             else:
                 shutil.copytree(f, f'{flutter_build_dir_2}{f.stem}')
 
-
 def get_features(args):
     features = ['inline'] if not args.flutter else []
     if args.hwcodec:
@@ -286,7 +292,6 @@ def get_features(args):
             features.append('screencapturekit')
     print("features:", features)
     return features
-
 
 def generate_control_file(version):
     control_file_path = "../res/DEBIAN/control"
@@ -308,12 +313,10 @@ Description: A remote control software.
     file.write(content)
     file.close()
 
-
 def ffi_bindgen_function_refactor():
     # workaround ffigen
     system2(
         'sed -i "s/ffi.NativeFunction<ffi.Bool Function(DartPort/ffi.NativeFunction<ffi.Uint8 Function(DartPort/g" flutter/lib/generated_bridge.dart')
-
 
 def build_flutter_deb(version, features):
     if not skip_cargo:
@@ -363,7 +366,6 @@ def build_flutter_deb(version, features):
     os.rename('rustdesk.deb', '../rustdesk-%s.deb' % version)
     os.chdir("..")
 
-
 def build_deb_from_folder(version, binary_folder):
     os.chdir('flutter')
     system2('mkdir -p tmpdeb/usr/bin/')
@@ -400,7 +402,6 @@ def build_deb_from_folder(version, binary_folder):
     os.rename('rustdesk.deb', '../rustdesk-%s.deb' % version)
     os.chdir("..")
 
-
 def build_flutter_dmg(version, features):
     if not skip_cargo:
         # set minimum osx build target, now is 10.14, which is the same as the flutter xcode project
@@ -419,7 +420,6 @@ def build_flutter_dmg(version, features):
     '''
     os.chdir("..")
 
-
 def build_flutter_arch_manjaro(version, features):
     if not skip_cargo:
         system2(f'cargo build --features {features} --lib --release')
@@ -429,7 +429,6 @@ def build_flutter_arch_manjaro(version, features):
     system2(f'strip {flutter_build_dir}/lib/librustdesk.so')
     os.chdir('../res')
     system2('HBB=`pwd`/.. FLUTTER=1 makepkg -f')
-
 
 def build_flutter_windows(version, features, skip_portable_pack):
     if not skip_cargo:
@@ -461,7 +460,6 @@ def build_flutter_windows(version, features, skip_portable_pack):
     print(
         f'output location: {os.path.abspath(os.curdir)}/rustdesk-{version}-install.exe')
 
-
 def main():
     global skip_cargo
     parser = make_parser()
@@ -486,7 +484,13 @@ def main():
         return
     res_dir = 'resources'
     external_resources(flutter, args, res_dir)
+    
+    # Windows编译逻辑开始位置
     if windows:
+        # 新增：调用链接Windows库的函数
+        link_windows_libs()
+        
+        # 原有Windows编译逻辑
         # build virtual display dynamic library
         os.chdir('libs/virtual_display/dylib')
         system2('cargo build --release')
@@ -575,7 +579,7 @@ def main():
     #rcodesign sign --p12-file ~/.p12/rustdesk-developer-id.p12 --p12-password-file ~/.p12/.cert-pass --code-signature-flags runtime ./target/release/bundle/osx/RustDesk.app
     # goto "Keychain Access" -> "My Certificates" for below id which starts with "Developer ID Application:"
     codesign -s "Developer ID Application: {0}" --force --options runtime  ./target/release/bundle/osx/RustDesk.app/Contents/MacOS/*
-    codesign -s "Developer ID Application: {0}" --force --options runtime  ./target/release/bundle/osx/RustDesk.app
+    codesign -s "Developer ID Application: {0}" --force --options runtime  ./target/release/bundle/osx/RustDesk.app/
     '''.format(pa))
                 system2(
                     'create-dmg "RustDesk %s.dmg" "target/release/bundle/osx/RustDesk.app"' % version)
@@ -630,7 +634,6 @@ def main():
                 system2('dpkg-deb -b tmpdeb rustdesk.deb; /bin/rm -rf tmpdeb/')
                 os.rename('rustdesk.deb', 'rustdesk-%s.deb' % version)
 
-
 def md5_file(fn):
     md5 = hashlib.md5(open('tmpdeb/' + fn, 'rb').read()).hexdigest()
     system2('echo "%s  /%s" >> tmpdeb/DEBIAN/md5sums' % (md5, fn))
@@ -641,7 +644,6 @@ def md5_file_folder(base_dir):
         if file.is_file() and 'DEBIAN' not in file.parts:
             relative_path = file.relative_to(base_path)
             md5_file(str(relative_path))
-
 
 if __name__ == "__main__":
     main()
