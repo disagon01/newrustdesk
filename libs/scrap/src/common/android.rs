@@ -6,49 +6,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::{io, time::Duration};
 
-// 新增的JNI相关导入
-use jni::objects::{JClass, JString};
-use jni::sys::jstring;
-use jni::JNIEnv;
-
-// 新增的获取设备码的JNI函数
-#[no_mangle]
-pub extern "system" fn Java_com_rustdesk_RustDesk_getMachineCode(
-    env: JNIEnv,
-    _class: JClass,
-) -> jstring {
-    // 调用Android API获取Android ID
-    let context = env.call_static_method(
-        "com/rustdesk/MainActivity",
-        "getContext",
-        "()Landroid/content/Context;",
-        &[],
-    ).unwrap().l().unwrap();
-    
-    let settings = env.call_method(
-        context,
-        "getSystemService",
-        "(Ljava/lang/String;)Ljava/lang/Object;",
-        &[env.new_string("secure").unwrap().into()],
-    ).unwrap().l().unwrap();
-    
-    let android_id = env.call_method(
-        settings,
-        "getString",
-        "(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;",
-        &[
-            env.call_method(context, "getContentResolver", "()Landroid/content/ContentResolver;", &[]).unwrap().l().unwrap().into(),
-            env.new_string("android_id").unwrap().into()
-        ],
-    ).unwrap().l().unwrap();
-    
-    let android_id_str: String = env.get_string(android_id.into()).unwrap().into();
-    // 哈希处理
-    let hash = sha256::digest(android_id_str);
-    let machine_code = &hash[0..16]; // 取前16位
-    env.new_string(machine_code).unwrap().into_inner()
-}
-
 lazy_static! {
    pub(crate)  static ref SCREEN_SIZE: Mutex<(u16, u16, u16)> = Mutex::new((0, 0, 0)); // (width, height, scale)
 }
