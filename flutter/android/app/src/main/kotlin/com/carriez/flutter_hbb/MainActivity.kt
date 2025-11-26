@@ -8,6 +8,7 @@ package com.carriez.flutter_hbb
  */
 
 import ffi.FFI
+
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -24,7 +25,6 @@ import android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlan
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.util.DisplayMetrics
-import android.provider.Settings
 import androidx.annotation.RequiresApi
 import org.json.JSONArray
 import org.json.JSONObject
@@ -33,8 +33,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
-import java.math.BigInteger
-import java.security.MessageDigest
+
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -42,9 +41,6 @@ class MainActivity : FlutterActivity() {
         private var _rdClipboardManager: RdClipboardManager? = null
         val rdClipboardManager: RdClipboardManager?
             get() = _rdClipboardManager;
-        
-        // 新增：注册验证的Channel名称
-        private const val REG_CHANNEL_TAG = "rustdesk/reg"
     }
 
     private val channelTag = "mChannel"
@@ -61,16 +57,11 @@ class MainActivity : FlutterActivity() {
                 bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
             }
         }
-        // 原有Flutter Channel初始化
         flutterMethodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             channelTag
         )
         initFlutterChannel(flutterMethodChannel!!)
-        
-        // 新增：初始化注册验证的MethodChannel
-        initRegChannel(flutterEngine)
-        
         thread { setCodecInfo() }
     }
 
@@ -215,8 +206,9 @@ class MainActivity : FlutterActivity() {
                     if (call.arguments is Int) {
                         val id = call.arguments as Int
                         mainService?.cancelNotification(id)
+                    } else {
+                        result.success(true)
                     }
-                    result.success(true)
                 }
                 "enable_soft_keyboard" -> {
                     // https://blog.csdn.net/hanye2020/article/details/105553780
@@ -271,68 +263,15 @@ class MainActivity : FlutterActivity() {
                 }
                 "on_voice_call_started" -> {
                     onVoiceCallStarted()
-                    result.success(true)
                 }
                 "on_voice_call_closed" -> {
                     onVoiceCallClosed()
-                    result.success(true)
                 }
                 else -> {
                     result.error("-1", "No such method", null)
                 }
             }
         }
-    }
-
-    // 新增：初始化注册验证的MethodChannel
-    private fun initRegChannel(flutterEngine: FlutterEngine) {
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, REG_CHANNEL_TAG)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "getMachineCode" -> {
-                        try {
-                            val machineCode = getMachineCode()
-                            result.success(machineCode)
-                        } catch (e: Exception) {
-                            result.error("-1", "获取机器码失败: ${e.message}", null)
-                        }
-                    }
-                    "verifyRegCode" -> {
-                        try {
-                            val regCode = call.argument<String>("regCode") ?: ""
-                            val machineCode = call.argument<String>("machineCode") ?: ""
-                            val secretKey = call.argument<String>("secretKey") ?: ""
-                            val isValid = verifyRegCode(regCode, machineCode, secretKey)
-                            result.success(isValid)
-                        } catch (e: Exception) {
-                            result.error("-1", "验证注册码失败: ${e.message}", null)
-                        }
-                    }
-                    else -> result.notImplemented()
-                }
-            }
-    }
-
-    // 新增：生成Android机器码（基于Android ID）
-    private fun getMachineCode(): String {
-        val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-            ?: throw Exception("获取Android ID失败")
-        val md = MessageDigest.getInstance("SHA-256")
-        val hash = md.digest(androidId.toByteArray())
-        val hex = BigInteger(1, hash).toString(16)
-        return if (hex.length > 16) hex.substring(0, 16) else hex.padStart(16, '0')
-    }
-
-    // 新增：注册验证逻辑
-    private fun verifyRegCode(regCode: String, machineCode: String, secretKey: String): Boolean {
-        if (regCode.isBlank() || machineCode.isBlank() || secretKey.isBlank()) {
-            return false
-        }
-        val input = "$machineCode_$secretKey"
-        val md = MessageDigest.getInstance("SHA-256")
-        val hash = md.digest(input.toByteArray())
-        val genCode = BigInteger(1, hash).toString(16).take(24)
-        return regCode == genCode
     }
 
     private fun setCodecInfo() {
@@ -466,81 +405,4 @@ class MainActivity : FlutterActivity() {
         super.onStart()
         stopService(Intent(this, FloatingWindowService::class.java))
     }
-
-    // 以下为原代码中缺失的常量/方法补全（若项目中已定义可删除）
-    private companion object {
-        const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
-        const val REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION = 1001
-        const val RES_FAILED = -1
-        const val START_ACTION = "START_ACTION"
-        const val GET_START_ON_BOOT_OPT = "GET_START_ON_BOOT_OPT"
-        const val SET_START_ON_BOOT_OPT = "SET_START_ON_BOOT_OPT"
-        const val SYNC_APP_DIR_CONFIG_PATH = "SYNC_APP_DIR_CONFIG_PATH"
-        const val GET_VALUE = "GET_VALUE"
-        const val KEY_IS_SUPPORT_VOICE_CALL = "KEY_IS_SUPPORT_VOICE_CALL"
-        const val KEY_SHARED_PREFERENCES = "rustdesk_prefs"
-        const val KEY_START_ON_BOOT_OPT = "start_on_boot"
-        const val KEY_APP_DIR_CONFIG_PATH = "app_dir_config_path"
-    }
-
-    private fun getScreenSize(windowManager: WindowManager): Pair<Int, Int> {
-        val metrics = DisplayMetrics()
-        windowManager.defaultDisplay.getRealMetrics(metrics)
-        return Pair(metrics.widthPixels, metrics.heightPixels)
-    }
-
-    private fun requestPermission(context: Context, permission: String) {
-        XXPermissions.with(context).permission(permission).request { _, _ -> }
-    }
-
-    private fun startAction(context: Context, action: String) {
-        // 原项目中实现的启动逻辑，此处为占位
-    }
-
-    private fun isSupportVoiceCall(): Boolean {
-        // 原项目中实现的语音通话支持判断，此处返回默认值
-        return true
-    }
-}
-
-// 原代码中引用的类占位（若项目中已存在可删除）
-class RdClipboardManager(clipboardManager: ClipboardManager) {
-    fun syncClipboard(force: Boolean) {
-        // 原项目中剪贴板同步逻辑
-    }
-}
-
-class MainService : Context() {
-    companion object {
-        var isReady = false
-    }
-    inner class LocalBinder : IBinder() {
-        fun getService(): MainService = this@MainService
-    }
-    fun startCapture(): Boolean = true
-    fun destroy() {}
-    fun checkMediaPermission(): Boolean = true
-    fun cancelNotification(id: Int) {}
-    fun onVoiceCallStarted(): Boolean = true
-    fun onVoiceCallClosed(): Boolean = true
-}
-
-object InputService {
-    var isOpen = false
-    var ctx: InputService? = null
-    fun disableSelf() {}
-}
-
-class AudioRecordHandle(
-    context: Context,
-    val check: () -> Boolean,
-    val isAudioStart: () -> Boolean
-) {
-    fun onVoiceCallStarted(data: Intent?): Boolean = true
-    fun onVoiceCallClosed(data: Intent?): Boolean = true
-}
-
-class PermissionRequestTransparentActivity : FlutterActivity()
-class FloatingWindowService : android.app.Service() {
-    override fun onBind(intent: Intent?): IBinder? = null
 }
