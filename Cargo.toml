@@ -45,12 +45,6 @@ screencapturekit = ["cpal/screencapturekit"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# ========== 新增：授权验证核心依赖 ==========
-ring = "0.17.8"          # HMAC加密/哈希
-base64 = "0.21.7"        # 注册码Base64编码
-sys-info = "0.13.2"      # Windows系统硬件信息获取
-ntp-client = "0.4.0"     # 简化NTP网络时间请求（可选，原代码已实现手动UDP）
-# ========== 原有依赖保留 ==========
 async-trait = "0.1"
 scrap = { path = "libs/scrap", features = ["wayland"] }
 hbb_common = { path = "libs/hbb_common" }
@@ -89,7 +83,6 @@ shutdown_hooks = "0.1"
 totp-rs = { version = "5.4", default-features = false, features = ["gen_secret", "otpauth"] }
 stunclient = "0.4"
 kcp-sys= { git = "https://github.com/rustdesk-org/kcp-sys"}
-
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # https://github.com/rustdesk/rustdesk/discussions/10197, not use cpal on linux
 cpal = { git = "https://github.com/rustdesk-org/cpal", branch = "osx-screencapturekit" }
@@ -106,6 +99,7 @@ ctrlc = "3.2"
 arboard = { git = "https://github.com/rustdesk-org/arboard", features = ["wayland-data-control"] }
 clipboard-master = { git = "https://github.com/rustdesk-org/clipboard-master" }
 portable-pty = { git = "https://github.com/rustdesk-org/wezterm", branch = "rustdesk/pty_based_0.8.1", package = "portable-pty" }
+
 system_shutdown = "4.0"
 qrcode-generator = "4.1"
 
@@ -202,8 +196,6 @@ winit = "0.30"
 android_logger = "0.13"
 jni = "0.21"
 android-wakelock = { git = "https://github.com/rustdesk-org/android-wakelock" }
-# ========== 新增：Android平台授权依赖补充 ==========
-ndk-glue = "0.7.0"       # Android原生开发胶水层（JNI调用必需）
 
 [workspace]
 members = ["libs/scrap", "libs/hbb_common", "libs/enigo", "libs/clipboard", "libs/virtual_display", "libs/virtual_display/dylib", "libs/portable", "libs/remote_printer"]
@@ -242,5 +234,3 @@ panic = 'abort'
 strip = true
 #opt-level = 'z' # only have smaller size after strip
 rpath = true
-# ========== 新增：授权逻辑编译优化补充 ==========
-opt-level = 3            # 编译优化（提升性能+防调试）
