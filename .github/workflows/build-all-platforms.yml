@@ -1,4 +1,4 @@
-name: RustDesk 全平台编译
+name: RustDesk all
 on:
   push:
     branches: [ master ]
