@@ -1,0 +1,99 @@
+name: RustDesk 全平台编译
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+      - name: 构建依赖缓存
+        uses: Swatinem/rust-cache@v2
+      - name: 编译 Windows 64位客户端
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-windows-x64
+          path: target/x86_64-pc-windows-msvc/release/rustdesk-custom.exe
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: aarch64-linux-android,armv7-linux-androideabi
+      - name: 安装 Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          ndk-version: r25c
+      - name: 配置 NDK 环境
+        run: echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/r25c" >> $GITHUB_ENV
+      - name: 构建依赖缓存
+        uses: Swatinem/rust-cache@v2
+      - name: 编译 Android 64位客户端
+        run: cargo build --release --target aarch64-linux-android
+      - name: 编译 Android 32位客户端
+        run: cargo build --release --target armv7-linux-androideabi
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-android
+          path: |
+            target/aarch64-linux-android/release/librustdesk_custom.so
+            target/armv7-linux-androideabi/release/librustdesk_custom.so
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-gnu
+      - name: 安装系统依赖
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: 构建依赖缓存
+        uses: Swatinem/rust-cache@v2
+      - name: 编译 Linux 64位客户端
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-linux-x64
+          path: target/x86_64-unknown-linux-gnu/release/rustdesk-custom
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: x86_64-apple-darwin,aarch64-apple-darwin
+      - name: 构建依赖缓存
+        uses: Swatinem/rust-cache@v2
+      - name: 编译 macOS Intel 版客户端
+        run: cargo build --release --target x86_64-apple-darwin
+      - name: 编译 macOS M 系列版客户端
+        run: cargo build --release --target aarch64-apple-darwin
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-macos
+          path: |
+            target/x86_64-apple-darwin/release/rustdesk-custom
+            target/aarch64-apple-darwin/release/rustdesk-custom
