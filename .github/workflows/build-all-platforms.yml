@@ -5,43 +5,69 @@ on:
   pull_request:
     branches: [ main ]
 
+# 全局环境变量配置
+env:
+  CARGO_TERM_COLOR: always
+  RUSTDESK_PACKAGE_NAME: rustdesk # 与Cargo.toml中的name保持一致
+
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive # RustDesk依赖子模块，必须拉取
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: x86_64-pc-windows-msvc
+      - name: 安装 Windows 系统依赖
+        run: choco install -y vcpython27 # RustDesk部分依赖需要
       - name: 构建依赖缓存
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: 编译 Windows 64位客户端
         run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: 验证产物存在性
+        run: Test-Path target/x86_64-pc-windows-msvc/release/${{ env.RUSTDESK_PACKAGE_NAME }}.exe
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-windows-x64
-          path: target/x86_64-pc-windows-msvc/release/rustdesk-custom.exe
+          path: |
+            target/x86_64-pc-windows-msvc/release/${{ env.RUSTDESK_PACKAGE_NAME }}.exe
+            target/x86_64-pc-windows-msvc/release/${{ env.RUSTDESK_PACKAGE_NAME }}.pdb
+          retention-days: 7 # 产物保留7天，可按需调整
 
   build-android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: aarch64-linux-android,armv7-linux-androideabi
-      - name: 安装 Android NDK
+      - name: 安装 Android NDK & SDK
         uses: android-actions/setup-android@v3
         with:
           ndk-version: r25c
-      - name: 配置 NDK 环境
-        run: echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/r25c" >> $GITHUB_ENV
+          api-level: 33 # 适配主流Android版本
+      - name: 配置 NDK 环境变量
+        run: |
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/r25c" >> $GITHUB_ENV
+          echo "NDK_PATH=$ANDROID_SDK_ROOT/ndk/r25c" >> $GITHUB_ENV
+          # 配置Android交叉编译链接器
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi33-clang" >> $GITHUB_ENV
       - name: 构建依赖缓存
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-android-${{ hashFiles('**/Cargo.lock') }}
       - name: 编译 Android 64位客户端
         run: cargo build --release --target aarch64-linux-android
       - name: 编译 Android 32位客户端
@@ -51,49 +77,75 @@ jobs:
         with:
           name: rustdesk-android
           path: |
-            target/aarch64-linux-android/release/librustdesk_custom.so
-            target/armv7-linux-androideabi/release/librustdesk_custom.so
+            target/aarch64-linux-android/release/liblibrustdesk.so # 与Cargo.toml的lib.name一致
+            target/armv7-linux-androideabi/release/liblibrustdesk.so
+          retention-days: 7
 
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: x86_64-unknown-linux-gnu
-      - name: 安装系统依赖
-        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: 安装 Linux 系统依赖（RustDesk完整依赖）
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxcb1-dev libx11-dev libgtk-3-dev libayatana-appindicator3-dev \
+            libasound2-dev libpulse-dev libssl-dev libdbus-1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: 构建依赖缓存
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-linux-${{ hashFiles('**/Cargo.lock') }}
       - name: 编译 Linux 64位客户端
         run: cargo build --release --target x86_64-unknown-linux-gnu
+      - name: 赋予执行权限
+        run: chmod +x target/x86_64-unknown-linux-gnu/release/${{ env.RUSTDESK_PACKAGE_NAME }}
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-linux-x64
-          path: target/x86_64-unknown-linux-gnu/release/rustdesk-custom
+          path: target/x86_64-unknown-linux-gnu/release/${{ env.RUSTDESK_PACKAGE_NAME }}
+          retention-days: 7
 
   build-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: x86_64-apple-darwin,aarch64-apple-darwin
+      - name: 安装 macOS 系统依赖
+        run: brew install pkg-config gtk+3 libappindicator-gtk3 openssl@3
+      - name: 配置 OpenSSL 环境
+        run: echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
       - name: 构建依赖缓存
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-macos-${{ hashFiles('**/Cargo.lock') }}
       - name: 编译 macOS Intel 版客户端
         run: cargo build --release --target x86_64-apple-darwin
-      - name: 编译 macOS M 系列版客户端
+      - name: 编译 macOS M系列（ARM）版客户端
         run: cargo build --release --target aarch64-apple-darwin
+      - name: 赋予执行权限
+        run: |
+          chmod +x target/x86_64-apple-darwin/release/${{ env.RUSTDESK_PACKAGE_NAME }}
+          chmod +x target/aarch64-apple-darwin/release/${{ env.RUSTDESK_PACKAGE_NAME }}
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-macos
           path: |
-            target/x86_64-apple-darwin/release/rustdesk-custom
-            target/aarch64-apple-darwin/release/rustdesk-custom
+            target/x86_64-apple-darwin/release/${{ env.RUSTDESK_PACKAGE_NAME }}
+            target/aarch64-apple-darwin/release/${{ env.RUSTDESK_PACKAGE_NAME }}
+          retention-days: 7
